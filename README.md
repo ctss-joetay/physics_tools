@@ -55,6 +55,23 @@ These constraints shaped the design and are worth knowing before adding tools:
   access to 120/240 fps slow motion and avoids Safari's patchy `MediaRecorder`
   codec support.
 
+## Using the tracker on an iPad
+
+- **Pinch with two fingers to zoom, slide both to pan.** One finger is always a
+  tap; a second finger cancels any pending tap, so zooming never drops a stray
+  data point. Tap accuracy is unaffected by zoom — positions are read through
+  the zoomed element's own bounding box, so a point tapped at 5x lands on
+  exactly the same video pixel as at 1x.
+- **The frame rate is detected automatically** from the frames the browser
+  presents (`requestVideoFrameCallback`, Safari 15.4+). Override it by hand if
+  detection fails, or press Detect to retry.
+- **Enter a mass to unlock the energy graphs** — KE, GPE and total energy
+  against time, plus the same three columns in the table and exports. `g`
+  defaults to 9.81 and is editable for syllabuses that use 10.
+- **Copy table data** puts the whole table on the clipboard tab-separated, so a
+  paste into Google Sheets lands in individual cells with headings, no import
+  dialog. Export CSV is there for a file.
+
 ## How the tracker computes its numbers
 
 - Time is read from `video.currentTime` at the moment of each tap, so the chosen
@@ -66,6 +83,13 @@ These constraints shaped the design and are worth knowing before adding tools:
   flipped so that upward is positive.
 - Velocity uses a central difference (second-order accurate, no lag), with
   one-sided differences at the ends.
+- KE uses the full speed (both components); GPE is measured from the origin the
+  student chose, so only *changes* in it are meaningful. Total energy is the
+  useful teaching line — flat means KE and GPE are trading cleanly.
+- Each mark's timestamp is captured into a local before the state update, not
+  read inside the updater. React runs updaters during the render pass, by which
+  point the auto-advance has already moved the video on — reading the clock
+  there stamps every point with the next frame's time.
 - Acceleration is reported twice — from a least-squares parabola fitted to `s–t`,
   and from the gradient of a straight line fitted to `v–t`. Agreement between the
   two is a good sanity check for students.
@@ -82,7 +106,8 @@ components/
   Chart.tsx           dependency-free SVG chart with hover readout
 lib/
   fit.ts              least-squares fits, central-difference derivative
-  csv.ts              CSV building and download
+  fps.ts              frame-rate detection via requestVideoFrameCallback
+  csv.ts              CSV/TSV building, clipboard copy, download
 ```
 
 Every tool page is a client component, because `navigator.mediaDevices` and the

@@ -18,8 +18,9 @@
   --baseline: #c3c2b7;
   --border: rgba(11, 11, 11, 0.1);
 
-  --series-1: #2a78d6; /* x / horizontal */
-  --series-2: #eb6834; /* y / vertical   */
+  --series-1: #2a78d6; /* x / horizontal · KE    */
+  --series-2: #eb6834; /* y / vertical   · GPE   */
+  --series-3: #1baf7a; /* total energy           */
 
   --good: #0ca30c;
   --critical: #d03b3b;
@@ -40,6 +41,7 @@
 
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
   }
 }
 
@@ -57,6 +59,7 @@
 
   --series-1: #3987e5;
   --series-2: #d95926;
+  --series-3: #199e70;
 }
 
 @theme inline {
@@ -68,6 +71,7 @@
   --color-hairline: var(--border);
   --color-series-1: var(--series-1);
   --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
   --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
