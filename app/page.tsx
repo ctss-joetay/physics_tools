@@ -16,6 +16,13 @@ const TOOLS: Tool[] = [
     status: "ready",
   },
   {
+    href: "/live",
+    name: "Live motion tracker",
+    blurb:
+      "Point the camera at a yellow or orange ball and watch displacement–time and velocity–time graphs draw themselves. Best for carts, pendulums and rolling balls.",
+    status: "ready",
+  },
+  {
     href: "/kinematics",
     name: "Sound timing gates",
     blurb:

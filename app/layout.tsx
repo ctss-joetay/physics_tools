@@ -36,6 +36,12 @@ export default function RootLayout({
             >
               Kinematics
             </Link>
+            <Link
+              href="/live"
+              className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              Live
+            </Link>
           </nav>
         </header>
         <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>
