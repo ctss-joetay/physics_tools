@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Chart from "./Chart";
+import MotionAnalysis from "./MotionAnalysis";
 import StepBanner from "./StepBanner";
-import { derivative, fitLinear, fitQuadratic, sig, type Pt } from "@/lib/fit";
-import { copyText, downloadCsv, toCsv, toTsv } from "@/lib/csv";
 import { measureFps, supportsFrameCallback } from "@/lib/fps";
+import { scaleFromCalibration, type Sample } from "@/lib/motion";
 
 /** A tap, stored in normalised video coordinates so it survives resize and zoom. */
 type Mark = { t: number; u: number; v: number };
@@ -23,9 +22,6 @@ const MAX_ZOOM = 10;
 /** Finger movement below this many pixels still counts as a tap, not a drag. */
 const TAP_SLOP = 10;
 const IDENTITY: View = { k: 1, tx: 0, ty: 0 };
-
-const BASE_HEADERS = ["t / s", "x / m", "y / m", "vx / m s^-1", "vy / m s^-1"];
-const ENERGY_HEADERS = ["KE / J", "GPE / J", "total E / J"];
 
 const clamp = (n: number, lo: number, hi: number) =>
   Math.min(hi, Math.max(lo, n));
@@ -71,7 +67,6 @@ export default function VideoTracker() {
   const [marks, setMarks] = useState<Mark[]>([]);
 
   const [view, setView] = useState<View>(IDENTITY);
-  const [copied, setCopied] = useState(false);
 
   // Object URLs must be revoked or the blob leaks for the life of the tab.
   useEffect(() => {
@@ -367,19 +362,15 @@ export default function VideoTracker() {
 
   // ------------------------------------------------------------- analysis
 
-  const mPerPx = useMemo(() => {
+  const scale = useMemo(() => {
     if (!calA || !calB || !dims) return null;
-    const metres = parseFloat(calMetres);
-    if (!Number.isFinite(metres) || metres <= 0) return null;
     const dx = (calA.u - calB.u) * dims.w;
     const dy = (calA.v - calB.v) * dims.h;
-    const px = Math.hypot(dx, dy);
-    if (px < 1) return null; // both taps landed on the same spot
-    return metres / px;
+    return scaleFromCalibration(Math.hypot(dx, dy), calMetres);
   }, [calA, calB, calMetres, dims]);
 
-  const data = useMemo(() => {
-    if (!mPerPx || !dims || marks.length === 0) return [];
+  const data = useMemo<Sample[]>(() => {
+    if (!scale || !dims || marks.length === 0) return [];
     // Two taps on the same frame would give a zero time step, which the
     // derivative cannot use and which would misalign the velocity arrays.
     const unique = marks.filter(
@@ -390,88 +381,14 @@ export default function VideoTracker() {
     return unique.map((m) => ({
       // Slow-motion footage plays back stretched, so real time runs faster.
       t: (m.t - t0) / slowmo,
-      x: (m.u - o.u) * dims.w * mPerPx,
+      x: (m.u - o.u) * dims.w * scale.mPerPx,
       // Screen y grows downward; physics y grows upward.
-      y: -(m.v - o.v) * dims.h * mPerPx,
+      y: -(m.v - o.v) * dims.h * scale.mPerPx,
     }));
-  }, [marks, mPerPx, dims, origin, slowmo]);
-
-  const xPts: Pt[] = useMemo(
-    () => data.map((d) => ({ t: d.t, s: d.x })),
-    [data],
-  );
-  const yPts: Pt[] = useMemo(
-    () => data.map((d) => ({ t: d.t, s: d.y })),
-    [data],
-  );
-  const vxPts = useMemo(() => derivative(xPts), [xPts]);
-  const vyPts = useMemo(() => derivative(yPts), [yPts]);
-
-  const fitX = useMemo(() => fitQuadratic(xPts), [xPts]);
-  const fitY = useMemo(() => fitQuadratic(yPts), [yPts]);
-  const fitVx = useMemo(() => fitLinear(vxPts), [vxPts]);
-  const fitVy = useMemo(() => fitLinear(vyPts), [vyPts]);
+  }, [marks, scale, dims, origin, slowmo]);
 
   const massKg = parseFloat(mass);
   const g = parseFloat(gravity);
-  const energyOn =
-    Number.isFinite(massKg) && massKg > 0 && Number.isFinite(g) && g > 0;
-
-  /**
-   * Energies at each tracked point.
-   *
-   * KE uses the full speed (both components), GPE is measured from whatever
-   * the student chose as the origin — so total energy is only conserved to
-   * within the accuracy of their tapping, which is the interesting part.
-   */
-  const energy = useMemo(() => {
-    if (!energyOn) return [];
-    return data.map((d, i) => {
-      const vx = vxPts[i]?.s ?? 0;
-      const vy = vyPts[i]?.s ?? 0;
-      const ke = 0.5 * massKg * (vx * vx + vy * vy);
-      const gpe = massKg * g * d.y;
-      return { t: d.t, ke, gpe, total: ke + gpe };
-    });
-  }, [data, vxPts, vyPts, massKg, g, energyOn]);
-
-  const headers = useMemo(
-    () => (energyOn ? [...BASE_HEADERS, ...ENERGY_HEADERS] : BASE_HEADERS),
-    [energyOn],
-  );
-
-  /** Rows shared by the CSV download and the clipboard copy. */
-  const tableRows = useMemo(
-    () =>
-      data.map((d, i) => {
-        const row = [
-          d.t.toFixed(5),
-          d.x.toFixed(5),
-          d.y.toFixed(5),
-          vxPts[i] === undefined ? "" : vxPts[i].s.toFixed(5),
-          vyPts[i] === undefined ? "" : vyPts[i].s.toFixed(5),
-        ];
-        if (energyOn && energy[i]) {
-          row.push(
-            energy[i].ke.toFixed(5),
-            energy[i].gpe.toFixed(5),
-            energy[i].total.toFixed(5),
-          );
-        }
-        return row;
-      }),
-    [data, vxPts, vyPts, energy, energyOn],
-  );
-
-  const exportCsv = () =>
-    downloadCsv("kinematics-data.csv", toCsv(headers, tableRows));
-
-  const copyTable = async () => {
-    // Tab-separated, so Sheets splits it into cells with no import dialog.
-    const ok = await copyText(toTsv(headers, tableRows));
-    setCopied(ok);
-    if (ok) setTimeout(() => setCopied(false), 2000);
-  };
 
   // --------------------------------------------------------------- render
 
@@ -777,7 +694,9 @@ export default function VideoTracker() {
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
               <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                Real length of the calibration line
+                {scale?.unit === "a.u."
+                  ? "Blank → arbitrary units (1 a.u. = the calibration line)"
+                  : "Real length of the calibration line. Leave blank for arbitrary units."}
               </span>
             </label>
 
@@ -862,7 +781,7 @@ export default function VideoTracker() {
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
               <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                Enter a mass to unlock the energy graphs
+                Enter a mass to unlock the force and energy graphs
               </span>
             </label>
 
@@ -885,212 +804,14 @@ export default function VideoTracker() {
             </label>
           </div>
 
-          {data.length >= 2 && (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Chart
-                  series={[
-                    {
-                      name: "x",
-                      color: "var(--series-1)",
-                      points: data.map((d) => ({ x: d.t, y: d.x })),
-                    },
-                    {
-                      name: "y",
-                      color: "var(--series-2)",
-                      points: data.map((d) => ({ x: d.t, y: d.y })),
-                    },
-                  ]}
-                  xLabel="time / s"
-                  yLabel="displacement / m"
-                  unit="m"
-                />
-                <Chart
-                  series={[
-                    {
-                      name: "vx",
-                      color: "var(--series-1)",
-                      points: vxPts.map((p) => ({ x: p.t, y: p.s })),
-                    },
-                    {
-                      name: "vy",
-                      color: "var(--series-2)",
-                      points: vyPts.map((p) => ({ x: p.t, y: p.s })),
-                    },
-                  ]}
-                  xLabel="time / s"
-                  yLabel="velocity / m s⁻¹"
-                  unit="m/s"
-                />
-              </div>
-
-              {energyOn && energy.length >= 2 && (
-                <div className="space-y-2">
-                  <Chart
-                    series={[
-                      {
-                        name: "KE",
-                        color: "var(--series-1)",
-                        points: energy.map((e) => ({ x: e.t, y: e.ke })),
-                      },
-                      {
-                        name: "GPE",
-                        color: "var(--series-2)",
-                        points: energy.map((e) => ({ x: e.t, y: e.gpe })),
-                      },
-                      {
-                        name: "total",
-                        color: "var(--series-3)",
-                        points: energy.map((e) => ({ x: e.t, y: e.total })),
-                      },
-                    ]}
-                    xLabel="time / s"
-                    yLabel="energy / J"
-                    unit="J"
-                    height={320}
-                  />
-                  <p className="px-1 text-[12px] leading-relaxed text-[var(--text-muted)]">
-                    GPE is measured from the origin you set, so only{" "}
-                    <em>changes</em> in it are meaningful. A flat total-energy
-                    line means KE and GPE are trading cleanly; a drifting one
-                    usually means tapping scatter or a scale that is slightly
-                    off, which is worth discussing with students.
-                  </p>
-                </div>
-              )}
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                {(
-                  [
-                    ["Horizontal (x)", fitX, fitVx, "var(--series-1)"],
-                    ["Vertical (y)", fitY, fitVy, "var(--series-2)"],
-                  ] as const
-                ).map(([label, q, l, color]) => (
-                  <div
-                    key={label}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        aria-hidden
-                        className="inline-block h-0.5 w-4 rounded-full"
-                        style={{ background: color }}
-                      />
-                      <h3 className="text-[14px] font-medium">{label}</h3>
-                    </div>
-                    {q ? (
-                      <dl className="tabular mt-3 space-y-1.5 text-[13px]">
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-[var(--text-secondary)]">
-                            Initial velocity, u
-                          </dt>
-                          <dd>{sig(q.u)} m s⁻¹</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-[var(--text-secondary)]">
-                            Acceleration, a (s–t fit)
-                          </dt>
-                          <dd>{sig(q.a)} m s⁻²</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-[var(--text-secondary)]">
-                            Acceleration, a (v–t gradient)
-                          </dt>
-                          <dd>{l ? `${sig(l.m)} m s⁻²` : "—"}</dd>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <dt className="text-[var(--text-secondary)]">
-                            r² of s–t fit
-                          </dt>
-                          <dd>{sig(q.r2, 4)}</dd>
-                        </div>
-                      </dl>
-                    ) : (
-                      <p className="mt-3 text-[13px] text-[var(--text-muted)]">
-                        Need at least 3 points for a fit.
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-[14px] font-medium">
-                    Data ({data.length} points)
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={copyTable}
-                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[13px]"
-                    >
-                      {copied ? "Copied ✓" : "Copy table data"}
-                    </button>
-                    <button
-                      onClick={exportCsv}
-                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[13px]"
-                    >
-                      Export CSV
-                    </button>
-                  </div>
-                </div>
-                <p className="mb-3 text-[12px] text-[var(--text-muted)]">
-                  Copy, then paste straight into Google Sheets — headings and
-                  values land in their own cells.
-                </p>
-                <div className="overflow-x-auto">
-                  <table className="tabular w-full text-left text-[13px]">
-                    <thead className="text-[var(--text-muted)]">
-                      <tr>
-                        {[
-                          "t / s",
-                          "x / m",
-                          "y / m",
-                          "vx / m s⁻¹",
-                          "vy / m s⁻¹",
-                          ...(energyOn
-                            ? ["KE / J", "GPE / J", "total E / J"]
-                            : []),
-                        ].map((h) => (
-                          <th key={h} className="py-1.5 pr-4 font-normal">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.map((d, i) => (
-                        <tr key={i} className="border-t border-[var(--border)]">
-                          <td className="py-1.5 pr-4">{d.t.toFixed(3)}</td>
-                          <td className="py-1.5 pr-4">{d.x.toFixed(4)}</td>
-                          <td className="py-1.5 pr-4">{d.y.toFixed(4)}</td>
-                          <td className="py-1.5 pr-4">
-                            {vxPts[i] ? vxPts[i].s.toFixed(4) : "—"}
-                          </td>
-                          <td className="py-1.5 pr-4">
-                            {vyPts[i] ? vyPts[i].s.toFixed(4) : "—"}
-                          </td>
-                          {energyOn && (
-                            <>
-                              <td className="py-1.5 pr-4">
-                                {energy[i] ? energy[i].ke.toFixed(4) : "—"}
-                              </td>
-                              <td className="py-1.5 pr-4">
-                                {energy[i] ? energy[i].gpe.toFixed(4) : "—"}
-                              </td>
-                              <td className="py-1.5 pr-4">
-                                {energy[i] ? energy[i].total.toFixed(4) : "—"}
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
+          <MotionAnalysis
+            data={data}
+            massKg={Number.isFinite(massKg) && massKg > 0 ? massKg : undefined}
+            g={Number.isFinite(g) && g > 0 ? g : undefined}
+            unit={scale?.unit ?? "m"}
+            csvFilename="kinematics-data.csv"
+            auNote="No real length was given, so distances are in arbitrary units (1 a.u. = the calibration line)."
+          />
         </>
       )}
     </div>
