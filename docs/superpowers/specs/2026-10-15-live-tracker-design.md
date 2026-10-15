@@ -26,6 +26,9 @@ HTTPS (Vercel), in Safari. No install, no login, nothing uploaded.
 | Target colour | Default bright yellow/orange hue band; tapping the object in preview re-samples the target colour; a sensitivity slider widens or narrows the match. |
 | Detection | Plain canvas pixel scan on the main thread at reduced resolution. No libraries. |
 | Smoothing | One Euro filter on the centroid, exposed as a single "Smoothing" slider. |
+| Graphs | Four charts stacked vertically on a shared time axis: displacement, velocity, speed, acceleration. Energy chart below when a mass is given. Applies to both trackers via the shared analysis component. |
+| Guidance | A distinct step banner at the top of each tracker always names the next action. |
+| Verification | Playwright clickthroughs run sequentially as a user against a fake camera feed, plus Vitest unit tests. |
 
 ## Known limitation
 
@@ -70,12 +73,41 @@ type Props = {
 };
 ```
 
-Renders, when `data.length >= 2`: the displacement and velocity charts, the
-energy chart and note when `massKg` and `g` are both present and positive,
-the two fit cards (horizontal and vertical), and the data table with Copy
-table data and Export CSV buttons. Owns the derived values it needs
+Renders, when `data.length >= 2`, in this order:
+
+1. Four charts stacked vertically, full width, each on its own axes, all
+   sharing the same time domain so the time axes line up: displacement
+   (`x`, `y`), velocity (`vx`, `vy`), speed (`|v|`), acceleration (`ax`,
+   `ay`). Acceleration is the central-difference derivative of velocity;
+   speed is `sqrt(vx² + vy²)`. `Chart` gains an optional `xDomain` prop so
+   the parent can pin all four to `[tMin, tMax]`. The charts are grouped
+   under a heading, with each chart carrying a short title.
+2. The energy chart and note when `massKg` and `g` are both present and
+   positive.
+3. The two fit cards (horizontal and vertical).
+4. The data table with Copy table data and Export CSV buttons. The table and
+   exports gain `speed / m s^-1`, `ax / m s^-2` and `ay / m s^-2` columns. Owns the derived values it needs
 (derivatives, fits, energies, table rows, copied flag). The parents keep the
 mass and g inputs and pass parsed values down.
+
+### Step banner (`components/StepBanner.tsx`)
+
+A shared, visually distinct banner (filled background in the accent colour,
+bold step label, one-sentence instruction) placed at the top of each tracker
+so the next action is always obvious. Props: `step: string`,
+`instruction: string`, optional `tone: "info" | "live" | "done"` (live pulses
+a red dot while recording). The video tracker's existing plain-text
+instruction line is replaced with this banner; its wording is unchanged.
+
+Live tracker banner text by state:
+
+| State | Step | Instruction |
+|---|---|---|
+| off | Step 1 of 3 — Camera | Press Start camera, then allow camera access. |
+| preview, nothing found | Step 2 of 3 — Find the object | Point the camera at a bright yellow or orange ball. If the ring doesn't lock on, tap the ball to sample its colour. |
+| preview, blob found | Step 2 of 3 — Ready | The ring is on the object. Check the diameter, then press Start. |
+| recording | Step 3 of 3 — Recording | Let the motion happen. Press Stop when it is done. |
+| done | Done | Scroll down for graphs and data, or press New run to go again. |
 
 ### Pure pixel scan (`lib/colour.ts`)
 
@@ -219,6 +251,29 @@ object is tracked automatically so there is nothing to tap precisely.
   structure updates, and a note that Vitest covers the pure `lib/` modules.
 
 ## Testing
+
+- **Playwright (new dev dependency, `npm run e2e`)**: sequential clickthroughs
+  in Chromium, `e2e/` directory, `fullyParallel: false`, one worker, against
+  `next dev` started by the Playwright config. Chromium is launched with
+  `--use-fake-ui-for-media-stream`, `--use-fake-device-for-media-stream` and
+  `--use-file-for-fake-video-capture=<y4m>`, where the Y4M file is generated
+  by a script (`e2e/fixtures/make-ball.ts`) that draws a yellow disc moving on
+  a parabola over a grey background at 30 fps for 6 s. The same script also
+  encodes an MP4 with Playwright's bundled ffmpeg for the video-tracker
+  clickthrough.
+  - `live.spec.ts`: visits `/live`; asserts the Step 1 banner; presses Start
+    camera; asserts the Step 2 banner changes to "Ready" and the ring is
+    visible; sets the diameter; presses Start; asserts the Recording banner
+    and that the live charts appear and gain points; presses Stop after 3 s;
+    asserts the Done banner, four stacked charts in order (displacement,
+    velocity, speed, acceleration) with aligned left plot edges and identical
+    time-axis tick labels, a table with more than 30 rows, and fitted
+    acceleration in y within 25 % of the synthetic parabola's value.
+  - `kinematics.spec.ts`: visits `/kinematics`; asserts the banner; uploads
+    the MP4; taps two calibration points, an origin and ten tracked points
+    following the banner prompts; asserts the four stacked charts, the table
+    and the CSV download.
+  - A home-page test asserts both tool cards link to their routes.
 
 - **Unit (Vitest, new dev dependency, `npm test`)**:
   - `rgbToHsv` on known colours; `matches` at hue boundaries and wrap-around.
