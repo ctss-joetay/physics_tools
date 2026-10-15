@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isZoomed, panRange, zoomRange, type Range } from "@/lib/view";
 
 export type Series = {
   name: string;
@@ -16,9 +17,28 @@ type Props = {
   /** Suffix shown in the tooltip, e.g. "m" or "m/s". */
   unit?: string;
   height?: number;
+  /** Short heading above the plot, e.g. "Velocity–time". */
+  title?: string;
+  /**
+   * Pin the full x extent instead of deriving it from the data, so several
+   * stacked charts share one time axis.
+   */
+  xDomain?: Range;
+  /**
+   * Controlled x view (zoomed/scrolled range). Pass `null` for "show all".
+   * When given, the chart reports changes through onXViewChange and the
+   * parent can share one view across several charts.
+   */
+  xView?: Range | null;
+  onXViewChange?: (view: Range | null) => void;
 };
 
+/** Constant padding so stacked charts' plot areas line up exactly. */
 const PAD = { top: 16, right: 56, bottom: 40, left: 56 };
+/** Pointer movement below this is a hover, not a drag. */
+const DRAG_SLOP = 6;
+/** Finger spread below this (px) is too small to read a zoom factor from. */
+const MIN_SPREAD = 20;
 
 /** "Nice" axis ticks — 1, 2, 2.5 or 5 times a power of ten. */
 function niceTicks(min: number, max: number, target = 5): number[] {
@@ -50,16 +70,54 @@ function fmt(v: number): string {
   return String(Number(v.toPrecision(4)));
 }
 
+type Gesture =
+  | {
+      kind: "drag";
+      id: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      xView: Range;
+      yView: Range;
+    }
+  | {
+      kind: "pinch";
+      ids: [number, number];
+      spreadX: number;
+      spreadY: number;
+      fx: number;
+      fy: number;
+      xView: Range;
+      yView: Range;
+    };
+
 export default function Chart({
   series,
   xLabel,
   yLabel,
   unit = "",
   height = 300,
+  title,
+  xDomain,
+  xView: xViewProp,
+  onXViewChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(640);
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [xViewState, setXViewState] = useState<Range | null>(null);
+  const [yView, setYView] = useState<Range | null>(null);
+
+  const controlled = xViewProp !== undefined;
+  const xView = controlled ? xViewProp : xViewState;
+  const setXView = useCallback(
+    (v: Range | null) => {
+      if (onXViewChange) onXViewChange(v);
+      if (!controlled) setXViewState(v);
+    },
+    [controlled, onXViewChange],
+  );
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -77,7 +135,8 @@ export default function Chart({
     [series],
   );
 
-  const domain = useMemo(() => {
+  /** The data's own extent — what "Reset zoom" returns to. */
+  const full = useMemo(() => {
     const xs: number[] = [];
     const ys: number[] = [];
     for (const s of populated) {
@@ -86,22 +145,30 @@ export default function Chart({
         if (Number.isFinite(p.y)) ys.push(p.y);
       }
     }
-    if (xs.length === 0) return null;
+    if (xs.length === 0 && !xDomain) return null;
 
-    let yMin = Math.min(...ys);
-    let yMax = Math.max(...ys);
+    let yMin = ys.length ? Math.min(...ys) : 0;
+    let yMax = ys.length ? Math.max(...ys) : 0;
     // Always show y = 0 so gradients read honestly against the axis.
     yMin = Math.min(yMin, 0);
     yMax = Math.max(yMax, 0);
     const yPad = (yMax - yMin) * 0.08 || 1;
 
-    return {
-      xMin: Math.min(...xs),
-      xMax: Math.max(...xs),
-      yMin: yMin - yPad,
-      yMax: yMax + yPad,
-    };
-  }, [populated]);
+    const x: Range = xDomain ?? [Math.min(...xs), Math.max(...xs)];
+    const y: Range = [yMin - yPad, yMax + yPad];
+    return { x, y };
+  }, [populated, xDomain]);
+
+  const domain = useMemo(() => {
+    if (!full) return null;
+    const x = xView ?? full.x;
+    const y = yView ?? full.y;
+    return { xMin: x[0], xMax: x[1], yMin: y[0], yMax: y[1] };
+  }, [full, xView, yView]);
+
+  const zoomed =
+    !!full &&
+    ((!!xView && isZoomed(xView, full.x)) || (!!yView && isZoomed(yView, full.y)));
 
   const plotW = width - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
@@ -124,10 +191,160 @@ export default function Chart({
     [domain, plotH],
   );
 
-  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setHoverX(e.clientX - rect.left);
+  // ------------------------------------------------------------- gestures
+
+  const gesture = useRef<Gesture | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const viewsRef = useRef({ xView, yView, full });
+  viewsRef.current = { xView, yView, full };
+
+  const resetZoom = useCallback(() => {
+    setXView(null);
+    setYView(null);
+  }, [setXView]);
+
+  const local = (e: { clientX: number; clientY: number }) => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
+
+  /** Fraction along the plot area, clamped to 0–1. */
+  const fracX = (px: number) =>
+    Math.min(1, Math.max(0, (px - PAD.left) / plotW));
+  const fracY = (py: number) =>
+    Math.min(1, Math.max(0, 1 - (py - PAD.top) / plotH));
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    const { full: f, xView: xv, yView: yv } = viewsRef.current;
+    if (!f) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture is an optimisation */
+    }
+    const p = local(e);
+    pointers.current.set(e.pointerId, p);
+
+    if (pointers.current.size === 1) {
+      gesture.current = {
+        kind: "drag",
+        id: e.pointerId,
+        startX: p.x,
+        startY: p.y,
+        moved: false,
+        xView: xv ?? f.x,
+        yView: yv ?? f.y,
+      };
+    } else if (pointers.current.size === 2) {
+      const [[idA, a], [idB, b]] = [...pointers.current.entries()];
+      setHoverX(null);
+      gesture.current = {
+        kind: "pinch",
+        ids: [idA, idB],
+        spreadX: Math.abs(a.x - b.x),
+        spreadY: Math.abs(a.y - b.y),
+        fx: fracX((a.x + b.x) / 2),
+        fy: fracY((a.y + b.y) / 2),
+        xView: xv ?? f.x,
+        yView: yv ?? f.y,
+      };
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const { full: f } = viewsRef.current;
+    const p = local(e);
+    const g = gesture.current;
+
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, p);
+
+    if (!g || !f) {
+      setHoverX(p.x);
+      return;
+    }
+
+    if (g.kind === "drag" && g.id === e.pointerId) {
+      const dx = p.x - g.startX;
+      const dy = p.y - g.startY;
+      if (!g.moved && Math.hypot(dx, dy) < DRAG_SLOP) {
+        setHoverX(p.x);
+        return;
+      }
+      g.moved = true;
+      setHoverX(null);
+      const xSpan = g.xView[1] - g.xView[0];
+      const ySpan = g.yView[1] - g.yView[0];
+      const nx = panRange(g.xView, f.x, (-dx / plotW) * xSpan);
+      const ny = panRange(g.yView, f.y, (dy / plotH) * ySpan);
+      setXView(isZoomed(nx, f.x) ? nx : null);
+      setYView(isZoomed(ny, f.y) ? ny : null);
+      return;
+    }
+
+    if (g.kind === "pinch") {
+      const a = pointers.current.get(g.ids[0]);
+      const b = pointers.current.get(g.ids[1]);
+      if (!a || !b) return;
+      const spreadX = Math.abs(a.x - b.x);
+      const spreadY = Math.abs(a.y - b.y);
+      // A sideways pinch stretches time only; an up-down pinch stretches values only.
+      if (g.spreadX >= MIN_SPREAD) {
+        const nx = zoomRange(g.xView, f.x, spreadX / g.spreadX, g.fx);
+        setXView(isZoomed(nx, f.x) ? nx : null);
+      }
+      if (g.spreadY >= MIN_SPREAD) {
+        const ny = zoomRange(g.yView, f.y, spreadY / g.spreadY, g.fy);
+        setYView(isZoomed(ny, f.y) ? ny : null);
+      }
+    }
+  };
+
+  const onPointerEnd = (e: React.PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId))
+        e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (pointers.current.size === 0) gesture.current = null;
+    else if (pointers.current.size === 1 && gesture.current?.kind === "pinch") {
+      // Lifting one finger ends the pinch; the remaining finger just hovers.
+      gesture.current = null;
+    }
+  };
+
+  // Trackpad: pinch arrives as a wheel event with ctrlKey; two-finger
+  // sideways scroll as deltaX. Both need preventDefault, so the listener
+  // must be non-passive. Vertical two-finger scroll is left to the page.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const { full: f, xView: xv, yView: yv } = viewsRef.current;
+      if (!f) return;
+      const r = el.getBoundingClientRect();
+      const px = e.clientX - r.left;
+      const py = e.clientY - r.top;
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const factor = Math.exp(-e.deltaY * 0.01);
+        const nx = zoomRange(xv ?? f.x, f.x, factor, fracX(px));
+        const ny = zoomRange(yv ?? f.y, f.y, factor, fracY(py));
+        setXView(isZoomed(nx, f.x) ? nx : null);
+        setYView(isZoomed(ny, f.y) ? ny : null);
+      } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        e.preventDefault();
+        const cur = xv ?? f.x;
+        const nx = panRange(cur, f.x, (e.deltaX / plotW) * (cur[1] - cur[0]));
+        setXView(isZoomed(nx, f.x) ? nx : null);
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // fracX/fracY are plain closures over plotW/plotH, listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotW, plotH, setXView]);
 
   // Nearest sample to the pointer, per series, for the crosshair readout.
   const hover = useMemo(() => {
@@ -149,14 +366,17 @@ export default function Chart({
     return { x: readouts[0].point.x, readouts };
   }, [hoverX, domain, populated, plotW]);
 
-  if (!domain) {
+  if (!domain || populated.length === 0) {
     return (
-      <div
-        ref={wrapRef}
-        className="flex items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-1)] text-[13px] text-[var(--text-muted)]"
-        style={{ height }}
-      >
-        No data yet
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
+        {title && <h4 className="px-1 pb-1 text-[13px] font-medium">{title}</h4>}
+        <div
+          ref={wrapRef}
+          className="flex items-center justify-center text-[13px] text-[var(--text-muted)]"
+          style={{ height }}
+        >
+          No data yet
+        </div>
       </div>
     );
   }
@@ -164,9 +384,18 @@ export default function Chart({
   const xTicks = niceTicks(domain.xMin, domain.xMax, 6);
   const yTicks = niceTicks(domain.yMin, domain.yMax, 5);
   const showLegend = populated.length >= 2;
+  const inX = (x: number) => x >= domain.xMin && x <= domain.xMax;
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
+    <div
+      className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3"
+      data-chart
+    >
+      {title && (
+        <h4 className="px-1 pb-1 text-[13px] font-medium" data-chart-title>
+          {title}
+        </h4>
+      )}
       {showLegend && (
         <div className="mb-1 flex flex-wrap items-center gap-4 px-1">
           {populated.map((s) => (
@@ -185,16 +414,43 @@ export default function Chart({
         </div>
       )}
 
+      {zoomed && (
+        <button
+          type="button"
+          onClick={resetZoom}
+          data-testid="reset-zoom"
+          className="absolute right-3 top-2 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"
+        >
+          Reset zoom
+        </button>
+      )}
+
       <div ref={wrapRef}>
         <svg
+          ref={svgRef}
           width={width}
           height={height}
-          onPointerMove={onMove}
-          onPointerLeave={() => setHoverX(null)}
-          style={{ touchAction: "pan-y", display: "block" }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
+          onPointerLeave={(e) => {
+            if (!gesture.current) setHoverX(null);
+            onPointerEnd(e);
+          }}
+          onDoubleClick={resetZoom}
+          // pan-y keeps one-finger vertical swipes scrolling the page;
+          // sideways drags and two-finger pinches reach us as pointer events.
+          style={{ touchAction: "pan-y", display: "block", cursor: "grab" }}
           role="img"
           aria-label={`${yLabel} against ${xLabel}`}
         >
+          <defs>
+            <clipPath id={`clip-${title ?? yLabel}`.replace(/\W/g, "-")}>
+              <rect x={PAD.left} y={PAD.top} width={plotW} height={plotH} />
+            </clipPath>
+          </defs>
+
           {/* gridlines */}
           {yTicks.map((t) => (
             <line
@@ -239,6 +495,7 @@ export default function Chart({
             y2={PAD.top + plotH}
             stroke="var(--baseline)"
             strokeWidth={1}
+            data-y-axis
           />
           <line
             x1={PAD.left}
@@ -273,6 +530,7 @@ export default function Chart({
               fontSize={11}
               fill="var(--text-muted)"
               style={{ fontVariantNumeric: "tabular-nums" }}
+              data-x-tick
             >
               {fmt(t)}
             </text>
@@ -297,46 +555,52 @@ export default function Chart({
             {yLabel}
           </text>
 
-          {/* series */}
-          {populated.map((s) => {
-            const d = s.points
-              .map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x)},${sy(p.y)}`)
-              .join(" ");
-            const last = s.points[s.points.length - 1];
-            return (
-              <g key={s.name}>
-                <path
-                  d={d}
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                {s.points.map((p, i) => (
-                  <circle
-                    key={i}
-                    cx={sx(p.x)}
-                    cy={sy(p.y)}
-                    r={4}
-                    fill={s.color}
-                    stroke="var(--surface-1)"
+          {/* series, clipped to the plot so zoomed-out points don't spill */}
+          <g clipPath={`url(#${`clip-${title ?? yLabel}`.replace(/\W/g, "-")})`}>
+            {populated.map((s) => {
+              const d = s.points
+                .map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.x)},${sy(p.y)}`)
+                .join(" ");
+              const visible = s.points.filter((p) => inX(p.x));
+              const last = visible[visible.length - 1];
+              return (
+                <g key={s.name}>
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke={s.color}
                     strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
-                ))}
-                {/* direct label at the line end — identity without colour alone */}
-                <text
-                  x={Math.min(sx(last.x) + 8, width - 4)}
-                  y={sy(last.y)}
-                  dominantBaseline="middle"
-                  fontSize={11}
-                  fill="var(--text-secondary)"
-                >
-                  {s.name}
-                </text>
-              </g>
-            );
-          })}
+                  {visible.map((p, i) => (
+                    <circle
+                      key={i}
+                      cx={sx(p.x)}
+                      cy={sy(p.y)}
+                      r={4}
+                      fill={s.color}
+                      stroke="var(--surface-1)"
+                      strokeWidth={2}
+                      data-point
+                    />
+                  ))}
+                  {/* direct label at the line end — identity without colour alone */}
+                  {last && (
+                    <text
+                      x={Math.min(sx(last.x) + 8, PAD.left + plotW - 4)}
+                      y={sy(last.y)}
+                      dominantBaseline="middle"
+                      fontSize={11}
+                      fill="var(--text-secondary)"
+                    >
+                      {s.name}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
 
           {/* crosshair */}
           {hover && (
@@ -384,6 +648,9 @@ export default function Chart({
           ))}
         </div>
       )}
+      <p className="mt-1 px-1 text-[11px] text-[var(--text-muted)]">
+        Pinch to zoom, drag to scroll, double-tap to reset.
+      </p>
     </div>
   );
 }
