@@ -33,7 +33,7 @@ const SCAN_W = 320;
 const LOST_AFTER = 3;
 /** How much of the trail to draw, seconds. */
 const TRAIL_SECONDS = 2;
-/** The overlay (ring, trail) redraws at most this often. */
+/** The scale readout and lost state update at most this often. */
 const OVERLAY_MS = 66;
 /** Live charts and the clock refresh this often. */
 const FLUSH_MS = 100;
@@ -68,6 +68,8 @@ function cameraError(err: unknown): string {
 export default function LiveTracker() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** Full-resolution copy of the last camera frame, shown once the run is done. */
+  const freezeRef = useRef<HTMLCanvasElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   const [phase, setPhase] = useState<Phase>("off");
@@ -186,7 +188,6 @@ export default function LiveTracker() {
     lastBlobRef.current = found;
     const sx = fx.current.filter(found.cx, tSeconds);
     const sy = fy.current.filter(found.cy, tSeconds);
-    const smooth: Blob = { ...found, cx: sx, cy: sy };
     const sample: RawSample = {
       t: tSeconds - t0Ref.current,
       px: sx / dims.w,
@@ -198,11 +199,13 @@ export default function LiveTracker() {
     recent.push(sample);
     while (recent.length && sample.t - recent[0].t > TRAIL_SECONDS) recent.shift();
 
+    // The ring sits on the raw detection every frame so it visibly stays on
+    // the ball; the trail and the data use the smoothed position.
+    setBlob(found);
+    setTrail([...recent]);
     if (now - lastOverlayRef.current > OVERLAY_MS) {
       lastOverlayRef.current = now;
       setLost(false);
-      setBlob(smooth);
-      setTrail([...recent]);
       const med = runningMedian(
         recent.map((s) => s.diameter),
         LIVE_SCALE_FRAMES,
@@ -320,6 +323,13 @@ export default function LiveTracker() {
   }, []);
 
   function stop() {
+    const v = videoRef.current;
+    const fz = freezeRef.current;
+    if (v && fz && v.videoWidth) {
+      fz.width = v.videoWidth;
+      fz.height = v.videoHeight;
+      fz.getContext("2d")?.drawImage(v, 0, 0);
+    }
     stopCamera();
     const dims = scanRef.current;
     const r = dims
@@ -480,6 +490,11 @@ export default function LiveTracker() {
               className="absolute inset-0 h-full w-full object-fill"
             />
             <canvas ref={canvasRef} className="hidden" />
+            <canvas
+              ref={freezeRef}
+              data-testid="freeze-frame"
+              className={`absolute inset-0 h-full w-full object-fill ${phase === "done" ? "" : "hidden"}`}
+            />
 
             {scan && (
               <svg

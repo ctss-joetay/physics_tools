@@ -50,6 +50,17 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   await expect(banner(page)).toHaveAttribute("data-tone", "done");
   await expect(page.getByTestId("live-charts")).toHaveCount(0);
   await expect(page.getByTestId("final-scale")).toContainText("px per m");
+  // The last camera frame stays on screen under the trail, not a black box.
+  const freeze = page.getByTestId("freeze-frame");
+  await expect(freeze).toBeVisible();
+  expect(
+    await freeze.evaluate((c: HTMLCanvasElement) => {
+      const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+      let bright = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 60) bright++;
+      return bright / (d.length / 4);
+    }),
+  ).toBeGreaterThan(0.9); // the grey background, not black
   await expectStackedGraphs(page);
 
   const rows = page.locator('[data-testid="data-table"] tbody tr');
