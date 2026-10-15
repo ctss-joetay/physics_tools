@@ -138,13 +138,48 @@ test("with a mass, force and energy store graphs join the stack", async ({ page 
   await page.getByTestId("primary-action").click();
   await expect(banner(page)).toContainText("Ready", { timeout: 15_000 });
   await page.getByTestId("diameter-input").fill("0.36");
-  await page.getByTestId("mass-input").fill("0.058");
   await page.getByTestId("primary-action").click(); // Start
   await waitForLivePoints(page);
   await page.getByTestId("primary-action").click(); // Stop
   await expect(banner(page)).toContainText("Done");
+  // Forgot the mass? It can still be entered after the run has stopped.
+  await expectStackedGraphs(page, false);
+  await page.getByTestId("mass-input").fill("0.058");
   await expectStackedGraphs(page, true);
   await expect(page.getByText("Kinetic store", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Gravitational potential store", { exact: true }).first()).toBeVisible();
   await expect(page.locator('[data-testid="data-table"] thead')).toContainText("Fx / N");
+});
+
+test("recording stops by itself at the time limit", async ({ page }) => {
+  await page.goto("/live?maxRun=2");
+  await page.getByTestId("primary-action").click();
+  await expect(banner(page)).toContainText("Ready", { timeout: 15_000 });
+  await page.getByTestId("primary-action").click(); // Start
+  await expect(banner(page)).toContainText("Recording");
+  await expect(banner(page)).toContainText("Done", { timeout: 6_000 });
+  await expect(page.getByTestId("final-scale")).toContainText(/over (1\.[5-9]|2\.\d) s/);
+});
+
+test("a double tap on Start camera opens one camera stream, not two", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __streams: MediaStream[] };
+    w.__streams = [];
+    const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (c) => {
+      const s = await orig(c);
+      w.__streams.push(s);
+      return s;
+    };
+  });
+  await page.goto("/live");
+  await page.getByTestId("primary-action").dblclick();
+  await expect(banner(page)).toContainText("Step 2 of 3", { timeout: 15_000 });
+  await page.waitForTimeout(500);
+  const live = await page.evaluate(() =>
+    (window as unknown as { __streams: MediaStream[] }).__streams.filter((s) =>
+      s.getTracks().some((t) => t.readyState === "live"),
+    ).length,
+  );
+  expect(live).toBe(1);
 });

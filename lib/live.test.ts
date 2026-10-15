@@ -81,3 +81,22 @@ describe("finaliseRun", () => {
     expect(finaliseRun(raw.slice(0, 1), "0.4", 320, 180)).toBeNull();
   });
 });
+
+describe("finaliseRun with a clock that jumps backwards", () => {
+  it("rebases later samples instead of discarding them", () => {
+    // 10 frames at 30 fps, then the camera clock restarts from 0.
+    const raw: RawSample[] = [];
+    for (let i = 0; i < 10; i++) raw.push({ t: 5 + i / 30, px: 0.5, py: 0.5, diameter: 40 });
+    for (let i = 0; i < 10; i++) raw.push({ t: i / 30, px: 0.5, py: 0.5 + i * 0.01, diameter: 40 });
+    const r = finaliseRun(raw, "0.4", 320, 180)!;
+    expect(r.data.length).toBe(20);
+    for (let i = 1; i < r.data.length; i++) {
+      expect(r.data[i].t).toBeGreaterThan(r.data[i - 1].t);
+    }
+    // The gap across the jump is one typical frame, not a 5 s hole or a negative step.
+    const gap = r.data[10].t - r.data[9].t;
+    expect(gap).toBeCloseTo(1 / 30, 3);
+    // Motion after the jump is preserved.
+    expect(r.data[19].y).toBeLessThan(r.data[10].y);
+  });
+});

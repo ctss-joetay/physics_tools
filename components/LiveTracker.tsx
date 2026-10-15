@@ -109,6 +109,26 @@ export default function LiveTracker() {
   const scanRef = useRef(scan);
   scanRef.current = scan;
 
+  /** Which clock this stream's frames are stamped with — decided once per stream. */
+  const clockRef = useRef<"media" | "perf" | null>(null);
+  /** Wall-clock time of the Start press; drives the on-screen clock and the cap. */
+  const startedAtRef = useRef(0);
+  /** Guards against a second tap on Start camera / New run while the first is pending. */
+  const startingRef = useRef(false);
+  const [maxRun, setMaxRun] = useState(MAX_RUN_SECONDS);
+  const maxRunRef = useRef(MAX_RUN_SECONDS);
+  const [stopNote, setStopNote] = useState<string | null>(null);
+
+  // `?maxRun=<seconds>` shortens the cap so the auto-stop can be exercised
+  // by the end-to-end tests without waiting a full minute.
+  useEffect(() => {
+    const n = parseFloat(new URLSearchParams(window.location.search).get("maxRun") ?? "");
+    if (Number.isFinite(n) && n > 0) {
+      setMaxRun(n);
+      maxRunRef.current = n;
+    }
+  }, []);
+
   const rawRef = useRef<RawSample[]>([]);
   const recentRef = useRef<RawSample[]>([]); // for the trail in preview too
   const lastBlobRef = useRef<Blob | null>(null);
@@ -225,9 +245,13 @@ export default function LiveTracker() {
     stopLoop();
     if (typeof v.requestVideoFrameCallback === "function") {
       const tick = (now: number, meta: { mediaTime: number }) => {
-        // mediaTime is the camera's own frame clock; fall back to the
-        // presentation clock if a browser reports it as 0 for live streams.
-        const t = meta.mediaTime > 0 ? meta.mediaTime : now / 1000;
+        // mediaTime is the camera's own frame clock. Some browsers report 0
+        // for live streams; decide once per stream so one run never mixes
+        // two clocks with different origins.
+        if (clockRef.current === null) {
+          clockRef.current = meta.mediaTime > 0 ? "media" : "perf";
+        }
+        const t = clockRef.current === "media" ? meta.mediaTime : now / 1000;
         processFrame(t);
         if (loopHandle.current) {
           loopHandle.current = { kind: "rvfc", id: v.requestVideoFrameCallback!(tick) };
@@ -246,7 +270,10 @@ export default function LiveTracker() {
   }, [processFrame, stopLoop]);
 
   const startCamera = useCallback(async () => {
+    if (startingRef.current) return;
+    startingRef.current = true;
     setError(null);
+    setStopNote(null);
     setTooFew(false);
     setResult(null);
     setLiveData([]);
@@ -255,6 +282,7 @@ export default function LiveTracker() {
     lastBlobRef.current = null;
     lostFramesRef.current = 0;
     t0Ref.current = 0;
+    clockRef.current = null;
     fx.current.reset();
     fy.current.reset();
     setBlob(null);
@@ -273,7 +301,8 @@ export default function LiveTracker() {
         audio: false,
       });
       const v = videoRef.current;
-      if (!v) {
+      if (!v || streamRef.current) {
+        // Unmounted meanwhile, or a stream is already running: never hold two.
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -284,17 +313,38 @@ export default function LiveTracker() {
         else v.onloadedmetadata = () => res();
       });
       await v.play();
-      const w = SCAN_W;
-      const h = Math.max(1, Math.round((SCAN_W * v.videoHeight) / v.videoWidth));
-      const c = canvasRef.current;
-      if (c) {
-        c.width = w;
-        c.height = h;
-      }
-      setScan({ w, h });
-      scanRef.current = { w, h };
+      const sizeScan = () => {
+        const w = SCAN_W;
+        const h = Math.max(1, Math.round((SCAN_W * v.videoHeight) / v.videoWidth));
+        const c = canvasRef.current;
+        if (c) {
+          c.width = w;
+          c.height = h;
+        }
+        setScan({ w, h });
+        scanRef.current = { w, h };
+        lastBlobRef.current = null;
+      };
+      sizeScan();
+      // Rotating the iPad swaps the frame's width and height. In preview we
+      // just re-measure; mid-run the scale would no longer be consistent, so
+      // the run ends with what was recorded and the student is told why.
+      v.onresize = () => {
+        if (!v.videoWidth || !v.videoHeight) return;
+        const cur = scanRef.current;
+        const h = Math.round((SCAN_W * v.videoHeight) / v.videoWidth);
+        if (cur && cur.h === h) return;
+        if (phaseRef.current === "recording") {
+          setStopNote(
+            "The camera view changed shape (was the iPad rotated?), so the run was stopped here.",
+          );
+          stopRef.current();
+        } else {
+          sizeScan();
+        }
+      };
       stream.getVideoTracks()[0].onended = () => {
-        if (phaseRef.current === "recording") stop();
+        if (phaseRef.current === "recording") stopRef.current();
         else {
           stopCamera();
           setPhase("off");
@@ -307,8 +357,9 @@ export default function LiveTracker() {
       stopCamera();
       setPhase("off");
       setError(cameraError(err));
+    } finally {
+      startingRef.current = false;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startLoop, stopCamera]);
 
   const start = useCallback(() => {
@@ -317,6 +368,7 @@ export default function LiveTracker() {
     const last = recentRef.current[recentRef.current.length - 1];
     t0Ref.current = last ? last.t + t0Ref.current : 0;
     recentRef.current = [];
+    startedAtRef.current = performance.now();
     setLiveData([]);
     setElapsed(0);
     setPhase("recording");
@@ -353,12 +405,25 @@ export default function LiveTracker() {
           finaliseRun(raw, diameterRef.current, dims.w, dims.h)?.data ?? [],
         );
       }
-      const e = raw.length ? raw[raw.length - 1].t : 0;
+      // Wall time, not sample time: the cap must fire even if the object
+      // has left the frame and no samples are arriving.
+      const e = (performance.now() - startedAtRef.current) / 1000;
       setElapsed(e);
-      if (e >= MAX_RUN_SECONDS) stopRef.current();
+      if (e >= maxRunRef.current) stopRef.current();
     }, FLUSH_MS);
     return () => clearInterval(id);
   }, [phase]);
+
+  // Changing the diameter after Stop re-scales the stored run; nothing has
+  // to be repeated physically.
+  useEffect(() => {
+    if (phase !== "done") return;
+    const dims = scanRef.current;
+    if (!dims) return;
+    const r = finaliseRun(rawRef.current, diameter, dims.w, dims.h);
+    setResult(r);
+    setTooFew(!r);
+  }, [diameter, phase]);
 
   // Release the camera if the student navigates away.
   useEffect(() => () => stopCamera(), [stopCamera]);
@@ -391,6 +456,19 @@ export default function LiveTracker() {
   // ------------------------------------------------------------ derived
 
   const live = useMemo(() => derive(liveData), [liveData]);
+  const liveSeries = useMemo(
+    () => ({
+      s: [
+        { name: "x", color: "var(--series-1)", points: live.xPts.map((p) => ({ x: p.t, y: p.s })) },
+        { name: "y", color: "var(--series-2)", points: live.yPts.map((p) => ({ x: p.t, y: p.s })) },
+      ],
+      v: [
+        { name: "vx", color: "var(--series-1)", points: live.vxPts.map((p) => ({ x: p.t, y: p.s })) },
+        { name: "vy", color: "var(--series-2)", points: live.vyPts.map((p) => ({ x: p.t, y: p.s })) },
+      ],
+    }),
+    [live],
+  );
   const massKg = parseFloat(mass);
   const g = parseFloat(gravity);
   const diameterBlank = !(parseFloat(diameter) > 0);
@@ -421,7 +499,7 @@ export default function LiveTracker() {
           step: "Step 3 of 3 — Recording",
           instruction: "Let the motion happen. Press Stop when it is done.",
           tone: "live" as const,
-          hint: `Recording stops by itself after ${MAX_RUN_SECONDS} s.`,
+          hint: `Recording stops by itself after ${maxRun} s.`,
         };
       case "done":
         return {
@@ -433,7 +511,7 @@ export default function LiveTracker() {
   })();
 
   const ring = blob && scan ? Math.max(blob.diameter / 2, 4) : 0;
-  const remaining = MAX_RUN_SECONDS - elapsed;
+  const remaining = maxRun - elapsed;
 
   // ------------------------------------------------------------ render
 
@@ -615,7 +693,13 @@ export default function LiveTracker() {
           </div>
         </div>
 
-        {phase !== "done" && (
+        {stopNote && (
+          <p role="status" className="px-1 text-[13px] text-[var(--text-secondary)]">
+            {stopNote}
+          </p>
+        )}
+
+        {phase !== "off" && (
           <div className="grid gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 sm:grid-cols-3">
             <label className="block text-[13px]">
               <span className="text-[var(--text-secondary)]">
@@ -639,6 +723,7 @@ export default function LiveTracker() {
               </span>
             </label>
 
+            {phase !== "done" && (<>
             <label className="block text-[13px]">
               <span className="text-[var(--text-secondary)]">Sensitivity</span>
               <input
@@ -695,6 +780,7 @@ export default function LiveTracker() {
                 Tap the object in the camera view to track a different colour
               </span>
             </div>
+            </>)}
 
             <label className="block text-[13px]">
               <span className="text-[var(--text-secondary)]">Mass / kg</span>
@@ -710,7 +796,9 @@ export default function LiveTracker() {
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
               <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                Enter a mass to unlock the force and energy graphs
+                {diameterBlank
+                  ? "Force and energy need a real diameter as well as a mass"
+                  : "Enter a mass to unlock the force and energy graphs"}
               </span>
             </label>
 
@@ -740,36 +828,14 @@ export default function LiveTracker() {
               xLabel="time / s"
               yLabel={`displacement / ${diameterBlank ? "a.u." : "m"}`}
               height={220}
-              series={[
-                {
-                  name: "x",
-                  color: "var(--series-1)",
-                  points: live.xPts.map((p) => ({ x: p.t, y: p.s })),
-                },
-                {
-                  name: "y",
-                  color: "var(--series-2)",
-                  points: live.yPts.map((p) => ({ x: p.t, y: p.s })),
-                },
-              ]}
+              series={liveSeries.s}
             />
             <Chart
               title="Velocity–time"
               xLabel="time / s"
               yLabel={`velocity / ${diameterBlank ? "a.u." : "m"} s⁻¹`}
               height={220}
-              series={[
-                {
-                  name: "vx",
-                  color: "var(--series-1)",
-                  points: live.vxPts.map((p) => ({ x: p.t, y: p.s })),
-                },
-                {
-                  name: "vy",
-                  color: "var(--series-2)",
-                  points: live.vyPts.map((p) => ({ x: p.t, y: p.s })),
-                },
-              ]}
+              series={liveSeries.v}
             />
           </section>
         )}

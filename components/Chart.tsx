@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isZoomed, panRange, zoomRange, type Range } from "@/lib/view";
 
 export type Series = {
@@ -39,6 +39,8 @@ const PAD = { top: 16, right: 56, bottom: 40, left: 56 };
 const DRAG_SLOP = 6;
 /** Finger spread below this (px) is too small to read a zoom factor from. */
 const MIN_SPREAD = 20;
+/** Above this many visible points the per-point markers are dropped: the line carries the shape. */
+const MAX_MARKERS = 150;
 
 /** "Nice" axis ticks — 1, 2, 2.5 or 5 times a power of ten. */
 function niceTicks(min: number, max: number, target = 5): number[] {
@@ -91,7 +93,7 @@ type Gesture =
       yView: Range;
     };
 
-export default function Chart({
+function Chart({
   series,
   xLabel,
   yLabel,
@@ -573,7 +575,7 @@ export default function Chart({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-                  {visible.map((p, i) => (
+                  {visible.length <= MAX_MARKERS && visible.map((p, i) => (
                     <circle
                       key={i}
                       cx={sx(p.x)}
@@ -654,3 +656,7 @@ export default function Chart({
     </div>
   );
 }
+
+// Memoised so a parent re-rendering for its own reasons (a camera frame,
+// a sibling chart's zoom) does not redraw every chart whose props are unchanged.
+export default memo(Chart);

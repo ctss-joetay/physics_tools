@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import Chart from "./Chart";
 import { fitLinear, fitQuadratic, sig } from "@/lib/fit";
 import { copyText, downloadCsv, toCsv, toTsv } from "@/lib/csv";
@@ -126,11 +126,58 @@ export default function MotionAnalysis({
     if (ok) setTimeout(() => setCopied(false), 2000);
   };
 
-  if (data.length < 2) return null;
-
-  const tDomain: Range = [data[0].t, data[data.length - 1].t];
+  // Series arrays are memoised so Chart's memo can skip unchanged charts
+  // while a sibling is being zoomed or scrolled.
   const pts = (arr: { t: number; s: number }[]) =>
     arr.map((p) => ({ x: p.t, y: p.s }));
+  const series = useMemo(
+    () => ({
+      s: [
+        { name: "x", color: "var(--series-1)", points: pts(d.xPts) },
+        { name: "y", color: "var(--series-2)", points: pts(d.yPts) },
+      ],
+      v: [
+        { name: "vx", color: "var(--series-1)", points: pts(d.vxPts) },
+        { name: "vy", color: "var(--series-2)", points: pts(d.vyPts) },
+      ],
+      speed: [{ name: "speed", color: "var(--series-3)", points: pts(d.speedPts) }],
+      a: [
+        { name: "ax", color: "var(--series-1)", points: pts(d.axPts) },
+        { name: "ay", color: "var(--series-2)", points: pts(d.ayPts) },
+      ],
+      f: [
+        { name: "Fx", color: "var(--series-1)", points: force.map((f) => ({ x: f.t, y: f.fx })) },
+        { name: "Fy", color: "var(--series-2)", points: force.map((f) => ({ x: f.t, y: f.fy })) },
+      ],
+      e: [
+        { name: "Kinetic store", color: "var(--series-1)", points: energy.map((e) => ({ x: e.t, y: e.ke })) },
+        { name: "Gravitational potential store", color: "var(--series-2)", points: energy.map((e) => ({ x: e.t, y: e.gpe })) },
+        { name: "Total", color: "var(--series-3)", points: energy.map((e) => ({ x: e.t, y: e.total })) },
+      ],
+    }),
+    [d, force, energy],
+  );
+  const tDomain = useMemo<Range>(
+    () => (data.length ? [data[0].t, data[data.length - 1].t] : [0, 1]),
+    [data],
+  );
+  const tableHeaders = useMemo(
+    () => [
+      "t / s",
+      `x / ${labels.s}`,
+      `y / ${labels.s}`,
+      `vx / ${labels.v}`,
+      `vy / ${labels.v}`,
+      `speed / ${labels.v}`,
+      `ax / ${labels.a}`,
+      `ay / ${labels.a}`,
+      ...(dynamicsOn ? ["Fx / N", "Fy / N", "KE / J", "GPE / J", "total E / J"] : []),
+    ],
+    [labels.s, labels.v, labels.a, dynamicsOn],
+  );
+
+  if (data.length < 2) return null;
+
   const shared = { xLabel: "time / s", xDomain: tDomain, xView, onXViewChange: setXView, height: CHART_H };
 
   return (
@@ -142,39 +189,28 @@ export default function MotionAnalysis({
           title="Displacement–time"
           yLabel={`displacement / ${labels.s}`}
           unit={labels.s}
-          series={[
-            { name: "x", color: "var(--series-1)", points: pts(d.xPts) },
-            { name: "y", color: "var(--series-2)", points: pts(d.yPts) },
-          ]}
+          series={series.s}
         />
         <Chart
           {...shared}
           title="Velocity–time"
           yLabel={`velocity / ${labels.v}`}
           unit={labels.v}
-          series={[
-            { name: "vx", color: "var(--series-1)", points: pts(d.vxPts) },
-            { name: "vy", color: "var(--series-2)", points: pts(d.vyPts) },
-          ]}
+          series={series.v}
         />
         <Chart
           {...shared}
           title="Speed–time"
           yLabel={`speed / ${labels.v}`}
           unit={labels.v}
-          series={[
-            { name: "speed", color: "var(--series-3)", points: pts(d.speedPts) },
-          ]}
+          series={series.speed}
         />
         <Chart
           {...shared}
           title="Acceleration–time"
           yLabel={`acceleration / ${labels.a}`}
           unit={labels.a}
-          series={[
-            { name: "ax", color: "var(--series-1)", points: pts(d.axPts) },
-            { name: "ay", color: "var(--series-2)", points: pts(d.ayPts) },
-          ]}
+          series={series.a}
         />
         {dynamicsOn && (
           <>
@@ -183,18 +219,7 @@ export default function MotionAnalysis({
               title="Net force–time"
               yLabel="force / N"
               unit="N"
-              series={[
-                {
-                  name: "Fx",
-                  color: "var(--series-1)",
-                  points: force.map((f) => ({ x: f.t, y: f.fx })),
-                },
-                {
-                  name: "Fy",
-                  color: "var(--series-2)",
-                  points: force.map((f) => ({ x: f.t, y: f.fy })),
-                },
-              ]}
+              series={series.f}
             />
             <Chart
               {...shared}
@@ -202,23 +227,7 @@ export default function MotionAnalysis({
               yLabel="energy / J"
               unit="J"
               height={300}
-              series={[
-                {
-                  name: "Kinetic store",
-                  color: "var(--series-1)",
-                  points: energy.map((e) => ({ x: e.t, y: e.ke })),
-                },
-                {
-                  name: "Gravitational potential store",
-                  color: "var(--series-2)",
-                  points: energy.map((e) => ({ x: e.t, y: e.gpe })),
-                },
-                {
-                  name: "Total",
-                  color: "var(--series-3)",
-                  points: energy.map((e) => ({ x: e.t, y: e.total })),
-                },
-              ]}
+              series={series.e}
             />
             <p className="px-1 text-[12px] leading-relaxed text-[var(--text-muted)]">
               The gravitational potential store is measured from the origin, so
@@ -316,47 +325,48 @@ export default function MotionAnalysis({
           Copy, then paste straight into Google Sheets — headings and values
           land in their own cells.
         </p>
-        <div className="max-h-[420px] overflow-auto">
-          <table className="tabular w-full text-left text-[13px]" data-testid="data-table">
-            <thead className="text-[var(--text-muted)]">
-              <tr>
-                {[
-                  "t / s",
-                  `x / ${labels.s}`,
-                  `y / ${labels.s}`,
-                  `vx / ${labels.v}`,
-                  `vy / ${labels.v}`,
-                  `speed / ${labels.v}`,
-                  `ax / ${labels.a}`,
-                  `ay / ${labels.a}`,
-                  ...(dynamicsOn
-                    ? ["Fx / N", "Fy / N", "KE / J", "GPE / J", "total E / J"]
-                    : []),
-                ].map((h) => (
-                  <th key={h} className="whitespace-nowrap py-1.5 pr-4 font-normal">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.map((row, i) => (
-                <tr key={i} className="border-t border-[var(--border)]">
-                  {row.map((c, j) => (
-                    <td key={j} className="py-1.5 pr-4">
-                      {c === ""
-                        ? "—"
-                        : j === 0
-                          ? Number(c).toFixed(3)
-                          : Number(c).toFixed(4)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable headers={tableHeaders} rows={tableRows} />
       </div>
     </>
   );
 }
+
+/**
+ * The table is its own memoised component: with a long run it is thousands
+ * of cells, and it must not be rebuilt while a chart above it is being
+ * dragged.
+ */
+const DataTable = memo(function DataTable({
+  headers,
+  rows,
+}: {
+  headers: string[];
+  rows: string[][];
+}) {
+  return (
+    <div className="max-h-[420px] overflow-auto">
+      <table className="tabular w-full text-left text-[13px]" data-testid="data-table">
+        <thead className="text-[var(--text-muted)]">
+          <tr>
+            {headers.map((h) => (
+              <th key={h} className="whitespace-nowrap py-1.5 pr-4 font-normal">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i} className="border-t border-[var(--border)]">
+              {row.map((c, j) => (
+                <td key={j} className="py-1.5 pr-4">
+                  {c === "" ? "—" : j === 0 ? Number(c).toFixed(3) : Number(c).toFixed(4)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+});

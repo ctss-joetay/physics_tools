@@ -59,10 +59,26 @@ export function finaliseRun(
   scanW: number,
   scanH: number,
 ): { data: Sample[]; unit: Unit; perPx: number } | null {
+  // Duplicate timestamps are dropped. A clock that jumps *backwards* (a
+  // camera stream restarting its clock, or a browser switching clocks) is
+  // treated as a discontinuity: the rest of the run is shifted so it
+  // continues one typical frame later, instead of being thrown away.
   const ordered: RawSample[] = [];
+  const dts: number[] = [];
+  let offset = 0;
   for (const s of raw) {
     const prev = ordered[ordered.length - 1];
-    if (!prev || s.t > prev.t) ordered.push(s);
+    let t = s.t + offset;
+    if (prev) {
+      if (t === prev.t) continue;
+      if (t < prev.t) {
+        const step = dts.length ? median(dts) : 1 / 30;
+        offset = prev.t + step - s.t;
+        t = prev.t + step;
+      }
+      dts.push(t - prev.t);
+    }
+    ordered.push({ ...s, t });
   }
   if (ordered.length < 2) return null;
 
