@@ -94,7 +94,32 @@ writeY4m(path.join(OUT, "ball.y4m"), true);
 writeY4m(path.join(OUT, "blank.y4m"), false);
 console.log("wrote ball.y4m and blank.y4m");
 
+/**
+ * Playwright's ffmpeg is a minimal build: its only video input is an MJPEG
+ * image pipe and its only encoder is VP9/WebM. Python's Pillow writes the
+ * JPEG frames; ffmpeg turns them into ball.webm. Either missing → skipped.
+ */
+const PY = `
+import sys
+from PIL import Image, ImageDraw
+W,H,FPS,SEC,R=${W},${H},${FPS},${SECONDS},${R}
+out=open(sys.argv[1],'wb')
+for i in range(FPS*SEC):
+    t=min(max(i/FPS-0.5,0),4)
+    cx=80+80*t; cy=300-240*t+60*t*t
+    im=Image.new('RGB',(W,H),(${GREY.join(",")}))
+    ImageDraw.Draw(im).ellipse([cx-R,cy-R,cx+R,cy+R],fill=(${YELLOW.join(",")}))
+    im.save(out,'JPEG',quality=95)
+`;
+
 const ffmpeg = findFfmpeg();
+const mjpeg = path.join(OUT, "ball.mjpeg");
+try {
+  execFileSync("python3", ["-c", PY, mjpeg], { stdio: "inherit" });
+} catch {
+  console.warn("python3 with Pillow not available; ball.webm skipped");
+  process.exit(0);
+}
 if (ffmpeg) {
   execFileSync(
     ffmpeg,
@@ -102,8 +127,14 @@ if (ffmpeg) {
       "-y",
       "-loglevel",
       "error",
+      "-f",
+      "image2pipe",
+      "-vcodec",
+      "mjpeg",
+      "-framerate",
+      String(FPS),
       "-i",
-      path.join(OUT, "ball.y4m"),
+      mjpeg,
       "-c:v",
       "libvpx-vp9",
       "-b:v",
