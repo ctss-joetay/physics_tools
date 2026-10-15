@@ -1,7 +1,17 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { banner, expectStackedGraphs, pinchWheel, touchPinch, xTicks } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
+
+/** A student would not press Stop before anything is recorded; nor do we. */
+async function waitForLivePoints(page: Page, min = 30) {
+  await expect
+    .poll(
+      async () => page.locator('[data-testid="live-charts"] [data-point]').count(),
+      { timeout: 15_000, message: "live charts never received points — is the camera feed delivering frames?" },
+    )
+    .toBeGreaterThan(min);
+}
 
 test("a student tracks the fake ball live, from camera to graphs", async ({ page }) => {
   await page.goto("/live");
@@ -99,7 +109,7 @@ test("a blank diameter gives arbitrary units and hides force and energy", async 
 
   await page.getByTestId("primary-action").click(); // Start
   await expect(banner(page)).toContainText("Recording");
-  await page.waitForTimeout(2000);
+  await waitForLivePoints(page);
   await page.getByTestId("primary-action").click(); // Stop
 
   await expect(banner(page)).toContainText("Done");
@@ -119,7 +129,7 @@ test("with a mass, force and energy store graphs join the stack", async ({ page 
   await page.getByTestId("diameter-input").fill("0.36");
   await page.getByTestId("mass-input").fill("0.058");
   await page.getByTestId("primary-action").click(); // Start
-  await page.waitForTimeout(2000);
+  await waitForLivePoints(page);
   await page.getByTestId("primary-action").click(); // Stop
   await expect(banner(page)).toContainText("Done");
   await expectStackedGraphs(page, true);
