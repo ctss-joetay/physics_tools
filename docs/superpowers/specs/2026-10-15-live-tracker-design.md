@@ -119,6 +119,32 @@ Live tracker banner text by state:
 | recording | Step 3 of 3 — Recording | Let the motion happen. Press Stop when it is done. |
 | done | Done | Scroll down for graphs and data, or press New run to go again. |
 
+### Chart zoom and scroll (`components/Chart.tsx`)
+
+Every chart can be zoomed and scrolled so a long or dense run can be
+inspected:
+
+- **Two-finger pinch on iPad**: scales the axes about the midpoint. The
+  horizontal spread of the fingers scales the time axis and the vertical
+  spread scales the value axis, so a sideways pinch stretches time only.
+- **Trackpad pinch** (a wheel event with `ctrlKey`, which is how macOS and
+  Chrome report it) zooms both axes about the pointer.
+- **Trackpad two-finger horizontal scroll** (wheel with `|deltaX| > |deltaY|`)
+  scrolls the time axis. Vertical two-finger scroll is left to the page.
+- **One-finger drag on iPad or click-and-drag with a mouse** scrolls the
+  graph. The SVG keeps `touch-action: pan-y`, so a mostly vertical swipe still
+  scrolls the page while a sideways drag scrolls the graph.
+- Zoom is clamped between 1× (the full data range) and 50×; scrolling is
+  clamped to the data range. A small "Reset zoom" button appears in the
+  chart corner once zoomed, and double-tap/double-click also resets.
+- In the stacked analysis view the time axis is **linked** across the four
+  charts: zooming or scrolling time on one moves all four, so they stay
+  aligned. Value-axis zoom is per chart. `Chart` therefore accepts optional
+  controlled `xView` / `onXViewChange` props; without them it manages its own
+  view.
+- While recording, a chart that has not been zoomed keeps auto-fitting new
+  data. Once zoomed, it holds its view until Reset zoom.
+
 ### Pure pixel scan (`lib/colour.ts`)
 
 ```ts
@@ -200,7 +226,7 @@ off ◀── camera error / permission denied (message, Retry button)
   and `derivative` from `lib/fit` directly; `MotionAnalysis` is only rendered
   in **done**, where the final scale applies.
   Lost frames show a "Lost — looking…" badge; the trail breaks and the filter
-  resets on reacquisition. Runs auto-stop at 120 s.
+  resets on reacquisition. Runs auto-stop at 60 s; the clock shows the remaining time in the last 10 s. Stop freezes the data: nothing is appended after it, and the final analysis is drawn once.
 - **done**: the camera track is stopped (the camera light goes off), the
   last frame stays on the canvas with the full trail, and `MotionAnalysis`
   renders the run. "New run" returns to preview by reopening the camera.

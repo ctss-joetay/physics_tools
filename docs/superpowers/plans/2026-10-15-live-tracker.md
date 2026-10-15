@@ -18,7 +18,7 @@
 - Default target hue 40°, tolerance 20° (slider 8°–35°); saturation ≥ 0.45, value ≥ 0.35; `MIN_PIXELS` = 8 at 320 px scan width.
 - One Euro: `minCutoff` 0.5–5 Hz via slider, `beta` 0.05, `dCutoff` 1 Hz.
 - Default diameter 0.067 m; blank → arbitrary units, label `a.u.`, energy hidden.
-- Final scale per run = median diameter over the run. Runs auto-stop at 120 s.
+- Final scale per run = median diameter over the run. Runs auto-stop at 60 s. Stop freezes the data.
 - Banner copy exactly as in the spec table.
 - Four charts stacked vertically, shared time domain, order: displacement, velocity, speed, acceleration.
 - Existing video tracker behaviour unchanged apart from the banner, the stacked charts, the new columns, and the a.u. fallback.
@@ -342,6 +342,26 @@ describe("sampleHue", () => {
 
 ---
 
+### Task 4b: Chart zoom and scroll
+
+**Files:** Modify `components/Chart.tsx`; Create `lib/view.ts`, `lib/view.test.ts`
+
+**Interfaces — Produces (`lib/view.ts`, pure):**
+```ts
+export type Range = [number, number];
+/** Zoom a range by factor about a fraction f (0–1) of its span; clamp to full and to max zoom. */
+export function zoomRange(cur: Range, full: Range, factor: number, f: number, maxZoom?: number): Range;
+/** Shift a range by delta, clamped inside full. */
+export function panRange(cur: Range, full: Range, delta: number): Range;
+export function isZoomed(cur: Range, full: Range): boolean;
+```
+
+- [ ] Tests: zoom in about f=0.5 halves the span and keeps the centre; zoom out never exceeds `full`; zoom in never exceeds 50×; pan clamps at both ends; `isZoomed` false for full. Run → FAIL → implement → PASS.
+- [ ] Chart: add state `xView: Range | null`, `yView: Range | null` (controlled x via props `xView?: Range | null`, `onXViewChange?: (r: Range | null) => void`). `domain` uses the view when set. Pointer handling on the SVG: one pointer → drag pans (dx → x, dy → y) once movement > 6 px (otherwise it is a hover); two pointers → anisotropic pinch (x spread ratio → `zoomRange` on x about the midpoint fraction, y spread ratio → y). Non-passive `wheel` listener: `ctrlKey` → zoom both about pointer by `exp(-deltaY·0.01)`; else if `|deltaX| > |deltaY|` → pan x by `deltaX` in data units and `preventDefault`; else do nothing (page scrolls). `onDoubleClick` → reset. "Reset zoom" button (`data-testid="reset-zoom"`) when `isZoomed` on either axis. `touchAction: "pan-y"` stays.
+- [ ] MotionAnalysis (Task 6) holds one shared `xView` and passes it to all four charts.
+- [ ] e2e (Task 9, add to `live.spec.ts` after Done): dispatch a `WheelEvent` with `ctrlKey: true, deltaY: -300` on the first chart svg via `page.evaluate` → `reset-zoom` buttons appear on all four charts and the first x tick label changes; mouse drag 200 px left on chart 2 → first x tick label of chart 1 changes too (linked); click reset → tick labels return to the original. Dispatch two `pointerdown`/`pointermove` pairs with `pointerType: "touch"` to simulate a pinch → zoomed.
+- [ ] Commit `feat(chart): pinch zoom and drag scroll`.
+
 ### Task 5: StepBanner
 
 **Files:** Create `components/StepBanner.tsx`; Modify `components/VideoTracker.tsx` (replace the instruction `<p>` at the top of the tracking card).
@@ -408,7 +428,7 @@ export const SMOOTHING = { min: 0.5, max: 5 }; export const SENSITIVITY = { min:
   Refs: `videoRef` (hidden `<video playsInline muted autoPlay>`), `canvasRef` (320×H scan canvas, `getContext("2d", { willReadFrequently: true })`), `streamRef`, `rawRef: RawSample[]`, `filters` (two `OneEuro`), `lastBlobRef`, `lostFramesRef`, `t0Ref`, `rvfcHandle`.
   - `startCamera()`: `navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, frameRate: { ideal: 60 } }, audio: false })`; on success set `srcObject`, wait for `loadedmetadata`, size the scan canvas to `320 × round(320·vh/vw)`, `phase = "preview"`, start loop. Error mapping per spec. `track.onended` handling per spec.
   - Loop: `rvfc` if `"requestVideoFrameCallback" in video` else `rAF`. Each tick: `drawImage(video, 0, 0, w, h)`, `getImageData`, window = `lastBlob ? {x: cx-1.5d, y: cy-1.5d, w: 3d, h: 3d} : null`, `findBlob`. If null: `lostFrames++`; after 3 → `lost = true`, `lastBlob = null`, filters reset. If found: filter `cx, cy` with `t = mediaTime ?? performance.now()/1000`; when recording push `RawSample` with `t - t0`.
-  - `start()`: `t0 = current t`, `rawRef = []`, `phase = "recording"`, 100 ms flush interval computing `liveData` via `finaliseRun(rawRef, diameter, w, h)?.data ?? []` (cheap at ≤ 3600 samples; use `runningMedian` of last 15 diameters for the live scale readout), auto-stop at 120 s.
+  - `start()`: `t0 = current t`, `rawRef = []`, `phase = "recording"`, 100 ms flush interval computing `liveData` via `finaliseRun(rawRef, diameter, w, h)?.data ?? []` (cheap at ≤ 3600 samples; use `runningMedian` of last 15 diameters for the live scale readout), auto-stop at 60 s.
   - `stop()`: cancel loop, stop tracks, `result = finaliseRun(...)`, `phase = "done"`.
   - `newRun()`: `result = null`, `startCamera()`.
   - Tap on the surface in preview → map to scan pixels → `sampleHue(img, x, y, 4)`; null → `sampleMsg = "That spot isn't a bright colour — tap the ball itself."`; else `target.hue = hue`.
