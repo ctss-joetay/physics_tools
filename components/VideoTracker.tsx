@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Chart from "./Chart";
+import StepBanner from "./StepBanner";
 import { derivative, fitLinear, fitQuadratic, sig, type Pt } from "@/lib/fit";
 import { copyText, downloadCsv, toCsv, toTsv } from "@/lib/csv";
 import { measureFps, supportsFrameCallback } from "@/lib/fps";
@@ -494,6 +495,12 @@ export default function VideoTracker() {
   return (
     <div className="space-y-6">
       {!videoUrl && (
+        <StepBanner
+          step="Start"
+          instruction="Record a clip with the camera or choose one from your files."
+        />
+      )}
+      {!videoUrl && (
         <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-8 text-center">
           <h2 className="text-[15px] font-medium">Start with a video</h2>
           <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[var(--text-secondary)]">
@@ -527,17 +534,13 @@ export default function VideoTracker() {
 
       {videoUrl && (
         <>
+          <StepBanner
+            step={tapMode === "track" ? "Tracking" : "Setting up"}
+            instruction={instruction[tapMode]}
+            hint="Pinch with two fingers to zoom, slide both to pan."
+          />
+
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
-            <p className="mb-2 px-1 text-[13px] text-[var(--text-secondary)]">
-              <span className="font-medium text-[var(--text-primary)]">
-                {tapMode === "track" ? "Tracking" : "Setting up"}
-              </span>{" "}
-              — {instruction[tapMode]}
-              <span className="text-[var(--text-muted)]">
-                {" "}
-                Pinch with two fingers to zoom, slide both to pan.
-              </span>
-            </p>
 
             <div
               ref={outerRef}
