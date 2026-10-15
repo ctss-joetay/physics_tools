@@ -92,11 +92,18 @@ Renders, when `data.length >= 2`, in this order:
    speed is `sqrt(vx² + vy²)`. `Chart` gains an optional `xDomain` prop so
    the parent can pin all four to `[tMin, tMax]`. The charts are grouped
    under a heading, with each chart carrying a short title.
-2. The energy chart and note when `massKg` and `g` are both present and
-   positive.
+2. When `massKg` and `g` are both present and positive (and `unit` is `m`):
+   a fifth stacked chart, **Net force–time** (`Fx = m·ax`, `Fy = m·ay`, in N),
+   sharing the same linked time axis; then the **energy stores** chart with
+   kinetic store, gravitational potential store and total overlaid on one
+   axis, with its note. Series names use syllabus wording: "Kinetic store",
+   "Gravitational potential store", "Total". Without a mass these two charts
+   are simply absent and everything else works.
 3. The two fit cards (horizontal and vertical).
 4. The data table with Copy table data and Export CSV buttons. The table and
-   exports gain `speed / m s^-1`, `ax / m s^-2` and `ay / m s^-2` columns. Owns the derived values it needs
+   exports gain `speed / m s^-1`, `ax / m s^-2` and `ay / m s^-2` columns,
+   and, when a mass is given, `Fx / N`, `Fy / N`, `KE / J`, `GPE / J`,
+   `total E / J`. Owns the derived values it needs
 (derivatives, fits, energies, table rows, copied flag). The parents keep the
 mass and g inputs and pass parsed values down.
 
