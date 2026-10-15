@@ -21,7 +21,7 @@ HTTPS (Vercel), in Safari. No install, no login, nothing uploaded.
 | Question | Decision |
 |---|---|
 | Output while running | Live displacement and velocity graphs under the camera view, refreshed about 10 times a second; full analysis on Stop. |
-| Scale | From the tracked object's own diameter. The student enters the real diameter in metres. |
+| Scale | From the tracked object's own diameter. The student enters the real diameter in metres. If the field is blank, the run is reported in arbitrary units (a.u.) where 1 a.u. is one object diameter. |
 | Placement | Separate tool page at `/live`, with a card on the home page. The video tracker is unchanged in behaviour. |
 | Target colour | Default bright yellow/orange hue band; tapping the object in preview re-samples the target colour; a sensitivity slider widens or narrows the match. |
 | Detection | Plain canvas pixel scan on the main thread at reduced resolution. No libraries. |
@@ -69,9 +69,19 @@ type Props = {
   /** Parsed, validated by the parent; undefined disables the energy section. */
   massKg?: number;
   g?: number;
+  /** "m" normally; "a.u." when no real length was given. Drives every label. */
+  unit: "m" | "a.u.";
   csvFilename: string;
 };
 ```
+
+When `unit` is `"a.u."`, axis labels, fit-card units, table headings and CSV
+headings read `a.u.`, `a.u. s^-1` and `a.u. s^-2`, and the energy section is
+hidden regardless of mass, since joules need metres. A one-line note under the
+charts says "No real length was given, so distances are in arbitrary units
+(1 a.u. = one object diameter)." for the live tracker, or "(1 a.u. = the
+calibration line)" for the video tracker. The video tracker treats a blank
+known-length field the same way.
 
 Renders, when `data.length >= 2`, in this order:
 
@@ -180,8 +190,9 @@ off ◀── camera error / permission denied (message, Retry button)
   the finger (`sampleHue`) and becomes the new target; a swatch shows the
   current target colour with a "Reset to yellow/orange" link. Controls:
   object diameter (metres, default 0.067 for a tennis ball), Sensitivity
-  slider, Smoothing slider, Mass, g. Start is enabled when a blob is visible
-  and the diameter is a positive number.
+  slider, Smoothing slider, Mass, g. Start is enabled when a blob is visible.
+  The diameter may be left blank, in which case the run is in arbitrary units
+  (1 a.u. = one object diameter) and the field's helper text says so.
 - **recording**: same view plus a fading trail of the last 2 s of positions
   and a running clock. Live charts (displacement and velocity) sit below the
   video and are refreshed from a ref on a 100 ms timer, not on every frame.
@@ -217,8 +228,9 @@ Conversion to metres:
 - **Live scale**: running median of the last 15 frames' equivalent diameters,
   divided into the entered diameter. Shown on screen as "scale: N px per m".
 - **Final scale**: on Stop, a single metres-per-pixel value is fixed as the
-  median of all recorded diameters divided into the entered diameter, and
-  every sample is converted with it. One scale per run matches the camera-
+  median of all recorded diameters divided into the entered diameter (or into
+  1 when the diameter is blank, giving arbitrary units), and every sample is
+  converted with it. One scale per run matches the camera-
   still, side-on assumption and removes frame-to-frame flicker from the data.
 - Origin is the first recorded sample. `x = (px − ox)·W·mPerPx`,
   `y = −(py − oy)·H·mPerPx` where `W, H` are the scan canvas dimensions, so up
