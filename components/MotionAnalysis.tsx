@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
-import Chart from "./Chart";
+import Chart, { type Hover } from "./Chart";
 import { fitLinear, fitQuadratic, sig } from "@/lib/fit";
 import { copyText, downloadCsv, toCsv, toTsv } from "@/lib/csv";
 import { csvHeaders, derive, unitLabels, type Sample, type Unit } from "@/lib/motion";
@@ -37,6 +37,8 @@ export default function MotionAnalysis({
   // One time view shared by every stacked chart, so zooming or scrolling
   // time on one moves them all and they stay aligned.
   const [xView, setXView] = useState<Range | null>(null);
+  // Likewise one hovered/pinned instant, highlighted on every chart at once.
+  const [hover, setHover] = useState<Hover | null>(null);
 
   const d = useMemo(() => derive(data), [data]);
   const labels = unitLabels(unit);
@@ -178,12 +180,20 @@ export default function MotionAnalysis({
 
   if (data.length < 2) return null;
 
-  const shared = { xLabel: "time / s", xDomain: tDomain, xView, onXViewChange: setXView, height: CHART_H };
+  const shared = {
+    xLabel: "time / s",
+    xDomain: tDomain,
+    xView,
+    onXViewChange: setXView,
+    hover,
+    onHoverChange: setHover,
+    height: CHART_H,
+  };
 
   return (
     <>
       <section className="space-y-3" data-testid="graphs">
-        <h3 className="px-1 text-[14px] font-medium">Graphs</h3>
+        <h3 className="px-1 text-[16px] font-medium">Graphs</h3>
         <Chart
           {...shared}
           title="Displacement–time"
@@ -229,7 +239,7 @@ export default function MotionAnalysis({
               height={300}
               series={series.e}
             />
-            <p className="px-1 text-[12px] leading-relaxed text-[var(--text-muted)]">
+            <p className="px-1 text-[14px] leading-relaxed text-[var(--text-muted)]">
               The gravitational potential store is measured from the origin, so
               only <em>changes</em> in it are meaningful. A flat total line
               means the kinetic and gravitational stores are trading cleanly; a
@@ -239,7 +249,7 @@ export default function MotionAnalysis({
           </>
         )}
         {unit === "a.u." && auNote && (
-          <p className="px-1 text-[12px] leading-relaxed text-[var(--text-muted)]" data-testid="au-note">
+          <p className="px-1 text-[14px] leading-relaxed text-[var(--text-muted)]" data-testid="au-note">
             {auNote}
           </p>
         )}
@@ -263,10 +273,10 @@ export default function MotionAnalysis({
                 className="inline-block h-0.5 w-4 rounded-full"
                 style={{ background: color }}
               />
-              <h3 className="text-[14px] font-medium">{label}</h3>
+              <h3 className="text-[16px] font-medium">{label}</h3>
             </div>
             {q ? (
-              <dl className="tabular mt-3 space-y-1.5 text-[13px]">
+              <dl className="tabular mt-3 space-y-1.5 text-[15px]">
                 <div className="flex justify-between gap-4">
                   <dt className="text-[var(--text-secondary)]">
                     Initial velocity, u
@@ -295,7 +305,7 @@ export default function MotionAnalysis({
                 </div>
               </dl>
             ) : (
-              <p className="mt-3 text-[13px] text-[var(--text-muted)]">
+              <p className="mt-3 text-[15px] text-[var(--text-muted)]">
                 Need at least 3 points for a fit.
               </p>
             )}
@@ -305,23 +315,23 @@ export default function MotionAnalysis({
 
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-[14px] font-medium">Data ({data.length} points)</h3>
+          <h3 className="text-[16px] font-medium">Data ({data.length} points)</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={copyTable}
-              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[13px]"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[15px]"
             >
               {copied ? "Copied ✓" : "Copy table data"}
             </button>
             <button
               onClick={exportCsv}
-              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[13px]"
+              className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[15px]"
             >
               Export CSV
             </button>
           </div>
         </div>
-        <p className="mb-3 text-[12px] text-[var(--text-muted)]">
+        <p className="mb-3 text-[14px] text-[var(--text-muted)]">
           Copy, then paste straight into Google Sheets — headings and values
           land in their own cells.
         </p>
@@ -345,7 +355,7 @@ const DataTable = memo(function DataTable({
 }) {
   return (
     <div className="max-h-[420px] overflow-auto">
-      <table className="tabular w-full text-left text-[13px]" data-testid="data-table">
+      <table className="tabular w-full text-left text-[15px]" data-testid="data-table">
         <thead className="text-[var(--text-muted)]">
           <tr>
             {headers.map((h) => (

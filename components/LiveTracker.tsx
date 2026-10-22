@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Chart from "./Chart";
+import Chart, { type Hover } from "./Chart";
 import MotionAnalysis from "./MotionAnalysis";
 import StepBanner from "./StepBanner";
 import {
@@ -24,6 +24,7 @@ import {
   type RawSample,
 } from "@/lib/live";
 import { derive, type Sample } from "@/lib/motion";
+import type { Range } from "@/lib/view";
 
 type Phase = "off" | "preview" | "recording" | "done";
 
@@ -95,6 +96,9 @@ export default function LiveTracker() {
   const [sampleMsg, setSampleMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ReturnType<typeof finaliseRun>>(null);
   const [tooFew, setTooFew] = useState(false);
+  // The two live graphs share one time view and one hovered/pinned instant.
+  const [liveView, setLiveView] = useState<Range | null>(null);
+  const [liveHover, setLiveHover] = useState<Hover | null>(null);
 
   // ------------------------------------------------------------ refs
 
@@ -277,6 +281,8 @@ export default function LiveTracker() {
     setTooFew(false);
     setResult(null);
     setLiveData([]);
+    setLiveView(null);
+    setLiveHover(null);
     rawRef.current = [];
     recentRef.current = [];
     lastBlobRef.current = null;
@@ -370,6 +376,8 @@ export default function LiveTracker() {
     recentRef.current = [];
     startedAtRef.current = performance.now();
     setLiveData([]);
+    setLiveView(null);
+    setLiveHover(null);
     setElapsed(0);
     setPhase("recording");
   }, []);
@@ -469,6 +477,18 @@ export default function LiveTracker() {
     }),
     [live],
   );
+  const liveDomain = useMemo<Range | undefined>(
+    () =>
+      liveData.length ? [liveData[0].t, liveData[liveData.length - 1].t] : undefined,
+    [liveData],
+  );
+  const liveLink = {
+    xDomain: liveDomain,
+    xView: liveView,
+    onXViewChange: setLiveView,
+    hover: liveHover,
+    onHoverChange: setLiveHover,
+  };
   const massKg = parseFloat(mass);
   const g = parseFloat(gravity);
   const diameterBlank = !(parseFloat(diameter) > 0);
@@ -522,7 +542,7 @@ export default function LiveTracker() {
       {error && (
         <div
           role="alert"
-          className="rounded-xl border border-[var(--critical)]/40 bg-[var(--surface-1)] p-4 text-[13px] leading-relaxed"
+          className="rounded-xl border border-[var(--critical)]/40 bg-[var(--surface-1)] p-4 text-[15px] leading-relaxed"
         >
           <p className="font-medium">Camera problem</p>
           <p className="mt-1 text-[var(--text-secondary)]">{error}</p>
@@ -531,8 +551,8 @@ export default function LiveTracker() {
 
       {phase === "off" && (
         <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-1)] p-8 text-center">
-          <h2 className="text-[15px] font-medium">Track a moving object live</h2>
-          <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-[var(--text-secondary)]">
+          <h2 className="text-[17px] font-medium">Track a moving object live</h2>
+          <p className="mx-auto mt-2 max-w-md text-[15px] leading-relaxed text-[var(--text-secondary)]">
             Prop the iPad up so it does not move, point it side-on at the
             motion, and use a bright yellow or orange ball. Good, even light
             helps the tracker a lot.
@@ -541,7 +561,7 @@ export default function LiveTracker() {
             type="button"
             onClick={() => void startCamera()}
             data-testid="primary-action"
-            className="mt-5 rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[14px] font-medium text-white"
+            className="mt-5 rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[16px] font-medium text-white"
           >
             {error ? "Retry" : "Start camera"}
           </button>
@@ -619,7 +639,7 @@ export default function LiveTracker() {
             {phase !== "done" && lost && (
               <div
                 data-testid="lost-badge"
-                className="absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[12px] text-white"
+                className="absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[14px] text-white"
               >
                 {phase === "recording"
                   ? "Lost — looking…"
@@ -628,7 +648,7 @@ export default function LiveTracker() {
             )}
 
             {phase === "recording" && (
-              <div className="tabular absolute right-2 top-2 flex items-center gap-2 rounded-md bg-black/70 px-2 py-1 text-[12px] text-white">
+              <div className="tabular absolute right-2 top-2 flex items-center gap-2 rounded-md bg-black/70 px-2 py-1 text-[14px] text-white">
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#e34948]" />
                 {remaining <= 10
                   ? `${Math.max(0, remaining).toFixed(0)} s left`
@@ -637,7 +657,7 @@ export default function LiveTracker() {
             )}
 
             {sampleMsg && (
-              <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/70 px-3 py-1.5 text-center text-[12px] text-white">
+              <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/70 px-3 py-1.5 text-center text-[14px] text-white">
                 {sampleMsg}
               </div>
             )}
@@ -650,7 +670,7 @@ export default function LiveTracker() {
                 onClick={start}
                 disabled={!blob}
                 data-testid="primary-action"
-                className="rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[14px] font-medium text-white disabled:opacity-40"
+                className="rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[16px] font-medium text-white disabled:opacity-40"
               >
                 Start
               </button>
@@ -660,7 +680,7 @@ export default function LiveTracker() {
                 type="button"
                 onClick={() => stop()}
                 data-testid="primary-action"
-                className="rounded-lg bg-[var(--critical)] px-4 py-2.5 text-[14px] font-medium text-white"
+                className="rounded-lg bg-[var(--critical)] px-4 py-2.5 text-[16px] font-medium text-white"
               >
                 Stop
               </button>
@@ -670,13 +690,13 @@ export default function LiveTracker() {
                 type="button"
                 onClick={() => void startCamera()}
                 data-testid="primary-action"
-                className="rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[14px] font-medium text-white"
+                className="rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[16px] font-medium text-white"
               >
                 New run
               </button>
             )}
             {phase === "preview" && (
-              <span className="text-[12px] text-[var(--text-muted)]">
+              <span className="text-[14px] text-[var(--text-muted)]">
                 {blob
                   ? "Object found."
                   : "Waiting for a bright yellow/orange object…"}
@@ -685,7 +705,7 @@ export default function LiveTracker() {
             {liveScale && phase !== "done" && (
               <span
                 data-testid="scale-readout"
-                className="tabular ml-auto text-[12px] text-[var(--text-muted)]"
+                className="tabular ml-auto text-[14px] text-[var(--text-muted)]"
               >
                 {liveScale}
               </span>
@@ -694,14 +714,14 @@ export default function LiveTracker() {
         </div>
 
         {stopNote && (
-          <p role="status" className="px-1 text-[13px] text-[var(--text-secondary)]">
+          <p role="status" className="px-1 text-[15px] text-[var(--text-secondary)]">
             {stopNote}
           </p>
         )}
 
         {phase !== "off" && (
           <div className="grid gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 sm:grid-cols-3">
-            <label className="block text-[13px]">
+            <label className="block text-[15px]">
               <span className="text-[var(--text-secondary)]">
                 Object diameter / m
               </span>
@@ -716,7 +736,7 @@ export default function LiveTracker() {
                 data-testid="diameter-input"
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 {diameterBlank
                   ? "Blank → arbitrary units (1 a.u. = one object diameter)"
                   : "Real diameter of the tracked object (tennis ball ≈ 0.067)"}
@@ -724,7 +744,7 @@ export default function LiveTracker() {
             </label>
 
             {phase !== "done" && (<>
-            <label className="block text-[13px]">
+            <label className="block text-[15px]">
               <span className="text-[var(--text-secondary)]">Sensitivity</span>
               <input
                 type="range"
@@ -737,12 +757,12 @@ export default function LiveTracker() {
                 }
                 className="mt-2 w-full accent-[var(--series-1)]"
               />
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 Narrow if it grabs the wrong thing, widen if it keeps losing the ball
               </span>
             </label>
 
-            <label className="block text-[13px]">
+            <label className="block text-[15px]">
               <span className="text-[var(--text-secondary)]">Smoothing</span>
               <input
                 type="range"
@@ -753,12 +773,12 @@ export default function LiveTracker() {
                 onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
                 className="mt-2 w-full accent-[var(--series-1)]"
               />
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 More smoothing steadies a jittery dot but lags fast motion
               </span>
             </label>
 
-            <div className="text-[13px]">
+            <div className="text-[15px]">
               <span className="text-[var(--text-secondary)]">Target colour</span>
               <div className="mt-2 flex items-center gap-3">
                 <span
@@ -771,18 +791,18 @@ export default function LiveTracker() {
                   type="button"
                   onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
                   disabled={target.hue === DEFAULT_TARGET.hue}
-                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[12px] disabled:opacity-40"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
                 >
                   Reset to yellow/orange
                 </button>
               </div>
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 Tap the object in the camera view to track a different colour
               </span>
             </div>
             </>)}
 
-            <label className="block text-[13px]">
+            <label className="block text-[15px]">
               <span className="text-[var(--text-secondary)]">Mass / kg</span>
               <input
                 type="number"
@@ -795,14 +815,14 @@ export default function LiveTracker() {
                 data-testid="mass-input"
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 {diameterBlank
                   ? "Force and energy need a real diameter as well as a mass"
                   : "Enter a mass to unlock the force and energy graphs"}
               </span>
             </label>
 
-            <label className="block text-[13px]">
+            <label className="block text-[15px]">
               <span className="text-[var(--text-secondary)]">g / m s⁻²</span>
               <input
                 type="number"
@@ -813,7 +833,7 @@ export default function LiveTracker() {
                 onChange={(e) => setGravity(e.target.value)}
                 className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
               />
-              <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
                 Used for GPE — set 10 if that is your syllabus convention
               </span>
             </label>
@@ -822,20 +842,24 @@ export default function LiveTracker() {
 
         {phase === "recording" && (
           <section className="space-y-3" data-testid="live-charts">
-            <h3 className="px-1 text-[14px] font-medium">Live graphs</h3>
+            <h3 className="px-1 text-[16px] font-medium">Live graphs</h3>
             <Chart
               title="Displacement–time"
               xLabel="time / s"
               yLabel={`displacement / ${diameterBlank ? "a.u." : "m"}`}
-              height={220}
+              unit={diameterBlank ? "a.u." : "m"}
+              height={260}
               series={liveSeries.s}
+              {...liveLink}
             />
             <Chart
               title="Velocity–time"
               xLabel="time / s"
               yLabel={`velocity / ${diameterBlank ? "a.u." : "m"} s⁻¹`}
-              height={220}
+              unit={`${diameterBlank ? "a.u." : "m"} s⁻¹`}
+              height={260}
               series={liveSeries.v}
+              {...liveLink}
             />
           </section>
         )}
@@ -843,7 +867,7 @@ export default function LiveTracker() {
         {phase === "done" && tooFew && (
           <div
             data-testid="too-few"
-            className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-6 text-center text-[13px] text-[var(--text-secondary)]"
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-6 text-center text-[15px] text-[var(--text-secondary)]"
           >
             Not enough points — the object was not seen during the recording.
             Check the colour and lighting, then press New run.
@@ -852,7 +876,7 @@ export default function LiveTracker() {
 
         {phase === "done" && result && (
           <>
-            <p className="px-1 text-[12px] text-[var(--text-muted)]" data-testid="final-scale">
+            <p className="px-1 text-[14px] text-[var(--text-muted)]" data-testid="final-scale">
               Scale fixed for this run: {Math.round(1 / result.perPx)} px per{" "}
               {result.unit}. {result.data.length} points over{" "}
               {result.data[result.data.length - 1].t.toFixed(1)} s.
