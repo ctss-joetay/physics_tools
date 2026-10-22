@@ -43,3 +43,7 @@ next-env.d.ts
 
 # sandbox scratch left by the remote session — safe to delete
 _gitlocks/
+
+# agent rules Next.js writes on `next dev`
+AGENTS.md
+CLAUDE.md
