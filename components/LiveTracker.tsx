@@ -761,7 +761,7 @@ export default function LiveTracker() {
               </div>
 
               <div
-                className={`min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pt-3 ${
+                className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pt-2 ${
                   railOpen ? "" : "sm:hidden"
                 }`}
               >
@@ -798,19 +798,19 @@ export default function LiveTracker() {
                   <span className="text-[var(--text-secondary)]">
                     Colour detection sensitivity
                   </span>
-                  <input
-                    type="range"
-                    min={SENSITIVITY.min}
-                    max={SENSITIVITY.max}
-                    step={1}
-                    value={target.tolerance}
-                    onChange={(e) =>
-                      setTarget((t) => ({ ...t, tolerance: parseInt(e.target.value, 10) }))
-                    }
-                    className="mt-2 w-full accent-[var(--series-1)]"
-                  />
-                  <span className="flex justify-between text-[13px] text-[var(--text-secondary)]">
+                  <span className="mt-1 flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
                     <span>Strict</span>
+                    <input
+                      type="range"
+                      min={SENSITIVITY.min}
+                      max={SENSITIVITY.max}
+                      step={1}
+                      value={target.tolerance}
+                      onChange={(e) =>
+                        setTarget((t) => ({ ...t, tolerance: parseInt(e.target.value, 10) }))
+                      }
+                      className="min-w-0 flex-1 accent-[var(--series-1)]"
+                    />
                     <span>Loose</span>
                   </span>
                   <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
@@ -821,17 +821,17 @@ export default function LiveTracker() {
 
                 <label className="block text-[15px]">
                   <span className="text-[var(--text-secondary)]">Smoothing</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={smoothing}
-                    onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
-                    className="mt-2 w-full accent-[var(--series-1)]"
-                  />
-                  <span className="flex justify-between text-[13px] text-[var(--text-secondary)]">
+                  <span className="mt-1 flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
                     <span>Less</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={smoothing}
+                      onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
+                      className="min-w-0 flex-1 accent-[var(--series-1)]"
+                    />
                     <span>More</span>
                   </span>
                   <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
@@ -852,15 +852,15 @@ export default function LiveTracker() {
                 </details>
               </div>
 
-              <div className="space-y-2 border-t border-[var(--border)] p-3 sm:mt-3">
-                <p className="text-[14px] text-[var(--text-muted)]">
-                  {blob ? "Object found." : "Waiting for a bright yellow/orange object…"}
+              <div className="space-y-2 border-t border-[var(--border)] p-3 sm:mt-2">
+                <p className="flex flex-wrap justify-between gap-x-3 text-[14px] text-[var(--text-muted)]">
+                  <span>{blob ? "Object found." : "Waiting for a bright yellow/orange object…"}</span>
+                  {liveScale && (
+                    <span data-testid="scale-readout" className="tabular">
+                      {liveScale}
+                    </span>
+                  )}
                 </p>
-                {liveScale && (
-                  <p data-testid="scale-readout" className="tabular text-[14px] text-[var(--text-muted)]">
-                    {liveScale}
-                  </p>
-                )}
                 <button
                   type="button"
                   onClick={start}
