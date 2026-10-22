@@ -826,8 +826,13 @@ export default function LiveTracker() {
                     onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
                     className="mt-2 w-full accent-[var(--series-1)]"
                   />
+                  <span className="flex justify-between text-[13px] text-[var(--text-secondary)]">
+                    <span>Less</span>
+                    <span>More</span>
+                  </span>
                   <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                    More smoothing steadies a jittery dot but lags fast motion
+                    More smoothing reduces jittering but struggles with fast-moving
+                    objects
                   </span>
                 </label>
 
