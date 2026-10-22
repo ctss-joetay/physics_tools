@@ -10,6 +10,12 @@ export type Series = {
   points: { x: number; y: number }[];
 };
 
+/**
+ * The time being inspected, in data units so several charts can share it.
+ * A pinned hover was set by a click or tap and stays until tapped again.
+ */
+export type Hover = { x: number; pinned: boolean };
+
 type Props = {
   series: Series[];
   xLabel: string;
@@ -31,16 +37,29 @@ type Props = {
    */
   xView?: Range | null;
   onXViewChange?: (view: Range | null) => void;
+  /**
+   * Controlled hover/selection. Pass `null` for none. When given, the chart
+   * reports changes through onHoverChange so stacked charts highlight the
+   * same instant together.
+   */
+  hover?: Hover | null;
+  onHoverChange?: (hover: Hover | null) => void;
 };
 
 /** Constant padding so stacked charts' plot areas line up exactly. */
-const PAD = { top: 16, right: 56, bottom: 40, left: 56 };
+const PAD = { top: 16, right: 64, bottom: 48, left: 68 };
 /** Pointer movement below this is a hover, not a drag. */
 const DRAG_SLOP = 6;
 /** Finger spread below this (px) is too small to read a zoom factor from. */
 const MIN_SPREAD = 20;
 /** Above this many visible points the per-point markers are dropped: the line carries the shape. */
 const MAX_MARKERS = 150;
+/** A tap this close (px) to the pinned point clears the pin. */
+const UNPIN_SLOP = 16;
+const TICK_FONT = 14;
+const AXIS_FONT = 15;
+const PAIR_FONT = 14;
+const PAIR_H = 24;
 
 /** "Nice" axis ticks — 1, 2, 2.5 or 5 times a power of ten. */
 function niceTicks(min: number, max: number, target = 5): number[] {
@@ -103,13 +122,25 @@ function Chart({
   xDomain,
   xView: xViewProp,
   onXViewChange,
+  hover: hoverProp,
+  onHoverChange,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(640);
-  const [hoverX, setHoverX] = useState<number | null>(null);
+  const [hoverState, setHoverState] = useState<Hover | null>(null);
   const [xViewState, setXViewState] = useState<Range | null>(null);
   const [yView, setYView] = useState<Range | null>(null);
+
+  const hoverControlled = hoverProp !== undefined;
+  const hoverSel = hoverControlled ? hoverProp : hoverState;
+  const setHover = useCallback(
+    (h: Hover | null) => {
+      if (onHoverChange) onHoverChange(h);
+      if (!hoverControlled) setHoverState(h);
+    },
+    [hoverControlled, onHoverChange],
+  );
 
   const controlled = xViewProp !== undefined;
   const xView = controlled ? xViewProp : xViewState;
@@ -197,8 +228,8 @@ function Chart({
 
   const gesture = useRef<Gesture | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const viewsRef = useRef({ xView, yView, full });
-  viewsRef.current = { xView, yView, full };
+  const viewsRef = useRef({ xView, yView, full, hoverSel });
+  viewsRef.current = { xView, yView, full, hoverSel };
 
   const resetZoom = useCallback(() => {
     setXView(null);
@@ -215,6 +246,22 @@ function Chart({
     Math.min(1, Math.max(0, (px - PAD.left) / plotW));
   const fracY = (py: number) =>
     Math.min(1, Math.max(0, 1 - (py - PAD.top) / plotH));
+
+  /** Pixel x → data x, clamped to the plot area. */
+  const dataXAt = (px: number) => {
+    if (!domain) return 0;
+    return domain.xMin + fracX(px) * (domain.xMax - domain.xMin);
+  };
+
+  /** Follow the pointer, unless a click has pinned a point. */
+  const hoverAt = (px: number) => {
+    if (viewsRef.current.hoverSel?.pinned) return;
+    setHover({ x: dataXAt(px), pinned: false });
+  };
+  const clearHover = () => {
+    if (viewsRef.current.hoverSel?.pinned) return;
+    if (viewsRef.current.hoverSel) setHover(null);
+  };
 
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     const { full: f, xView: xv, yView: yv } = viewsRef.current;
@@ -239,7 +286,7 @@ function Chart({
       };
     } else if (pointers.current.size === 2) {
       const [[idA, a], [idB, b]] = [...pointers.current.entries()];
-      setHoverX(null);
+      clearHover();
       gesture.current = {
         kind: "pinch",
         ids: [idA, idB],
@@ -261,7 +308,7 @@ function Chart({
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, p);
 
     if (!g || !f) {
-      setHoverX(p.x);
+      hoverAt(p.x);
       return;
     }
 
@@ -269,11 +316,11 @@ function Chart({
       const dx = p.x - g.startX;
       const dy = p.y - g.startY;
       if (!g.moved && Math.hypot(dx, dy) < DRAG_SLOP) {
-        setHoverX(p.x);
+        hoverAt(p.x);
         return;
       }
       g.moved = true;
-      setHoverX(null);
+      clearHover();
       const xSpan = g.xView[1] - g.xView[0];
       const ySpan = g.yView[1] - g.yView[0];
       const nx = panRange(g.xView, f.x, (-dx / plotW) * xSpan);
@@ -302,6 +349,24 @@ function Chart({
   };
 
   const onPointerEnd = (e: React.PointerEvent<SVGSVGElement>) => {
+    const g = gesture.current;
+    // A click or tap that did not drag pins the nearest point on every
+    // linked chart; tapping the pinned point again releases it.
+    if (
+      e.type === "pointerup" &&
+      g?.kind === "drag" &&
+      g.id === e.pointerId &&
+      !g.moved &&
+      pointers.current.size === 1
+    ) {
+      const p = local(e);
+      const cur = viewsRef.current.hoverSel;
+      if (cur?.pinned && Math.abs(sx(cur.x) - p.x) < UNPIN_SLOP) {
+        setHover(e.pointerType === "mouse" ? { x: dataXAt(p.x), pinned: false } : null);
+      } else {
+        setHover({ x: dataXAt(p.x), pinned: true });
+      }
+    }
     pointers.current.delete(e.pointerId);
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId))
@@ -350,9 +415,8 @@ function Chart({
 
   // Nearest sample to the pointer, per series, for the crosshair readout.
   const hover = useMemo(() => {
-    if (hoverX === null || !domain || populated.length === 0) return null;
-    const span = domain.xMax - domain.xMin || 1;
-    const dataX = domain.xMin + ((hoverX - PAD.left) / plotW) * span;
+    if (!hoverSel || !domain || populated.length === 0) return null;
+    const dataX = hoverSel.x;
 
     const readouts = populated
       .map((s) => {
@@ -365,16 +429,16 @@ function Chart({
       .filter((r) => r.point !== undefined);
 
     if (readouts.length === 0) return null;
-    return { x: readouts[0].point.x, readouts };
-  }, [hoverX, domain, populated, plotW]);
+    return { x: readouts[0].point.x, pinned: hoverSel.pinned, readouts };
+  }, [hoverSel, domain, populated]);
 
   if (!domain || populated.length === 0) {
     return (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
-        {title && <h4 className="px-1 pb-1 text-[13px] font-medium">{title}</h4>}
+        {title && <h4 className="px-1 pb-1 text-[16px] font-medium">{title}</h4>}
         <div
           ref={wrapRef}
-          className="flex items-center justify-center text-[13px] text-[var(--text-muted)]"
+          className="flex items-center justify-center text-[15px] text-[var(--text-muted)]"
           style={{ height }}
         >
           No data yet
@@ -382,6 +446,41 @@ function Chart({
       </div>
     );
   }
+
+  const xUnit = xLabel.split(" / ")[1] ?? "";
+  const withUnit = (v: number, u: string) => (u ? `${fmt(v)} ${u}` : fmt(v));
+
+  /**
+   * "(t, y)" boxes beside the highlighted points: to the right unless that
+   * would leave the plot, nudged apart vertically so two series never overlap.
+   */
+  const pairLabels = (
+    readouts: { name: string; color: string; point: { x: number; y: number } }[],
+  ) => {
+    const right = PAD.left + plotW;
+    const labels = readouts
+      .filter((r) => Number.isFinite(r.point.y))
+      .map((r) => {
+        const text = `(${withUnit(r.point.x, xUnit)}, ${withUnit(r.point.y, unit)})`;
+        const w = text.length * PAIR_FONT * 0.56 + 16;
+        const cx = sx(r.point.x);
+        const x = cx + 12 + w <= right ? cx + 12 : Math.max(PAD.left, cx - 12 - w);
+        return { name: r.name, color: r.color, text, w, x, y: sy(r.point.y) - PAIR_H / 2 };
+      })
+      .sort((a, b) => a.y - b.y);
+    const top = PAD.top;
+    const bottom = PAD.top + plotH - PAIR_H;
+    for (let i = 0; i < labels.length; i++) {
+      const min = i === 0 ? top : labels[i - 1].y + PAIR_H + 4;
+      labels[i].y = Math.max(labels[i].y, min);
+    }
+    // If the stack ran off the bottom, push it back up from the end.
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const max = i === labels.length - 1 ? bottom : labels[i + 1].y - PAIR_H - 4;
+      labels[i].y = Math.max(top, Math.min(labels[i].y, max));
+    }
+    return labels;
+  };
 
   const xTicks = niceTicks(domain.xMin, domain.xMax, 6);
   const yTicks = niceTicks(domain.yMin, domain.yMax, 5);
@@ -394,7 +493,7 @@ function Chart({
       data-chart
     >
       {title && (
-        <h4 className="px-1 pb-1 text-[13px] font-medium" data-chart-title>
+        <h4 className="px-1 pb-1 text-[16px] font-medium" data-chart-title>
           {title}
         </h4>
       )}
@@ -403,7 +502,7 @@ function Chart({
           {populated.map((s) => (
             <span
               key={s.name}
-              className="flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]"
+              className="flex items-center gap-1.5 text-[14px] text-[var(--text-secondary)]"
             >
               <span
                 aria-hidden
@@ -421,7 +520,7 @@ function Chart({
           type="button"
           onClick={resetZoom}
           data-testid="reset-zoom"
-          className="absolute right-3 top-2 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"
+          className="absolute right-3 top-2 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[13px] text-[var(--text-secondary)]"
         >
           Reset zoom
         </button>
@@ -437,7 +536,7 @@ function Chart({
           onPointerUp={onPointerEnd}
           onPointerCancel={onPointerEnd}
           onPointerLeave={(e) => {
-            if (!gesture.current) setHoverX(null);
+            if (!gesture.current) clearHover();
             onPointerEnd(e);
           }}
           onDoubleClick={resetZoom}
@@ -516,7 +615,7 @@ function Chart({
               y={sy(t)}
               textAnchor="end"
               dominantBaseline="middle"
-              fontSize={11}
+              fontSize={TICK_FONT}
               fill="var(--text-muted)"
               style={{ fontVariantNumeric: "tabular-nums" }}
             >
@@ -527,9 +626,9 @@ function Chart({
             <text
               key={`tx${t}`}
               x={sx(t)}
-              y={PAD.top + plotH + 16}
+              y={PAD.top + plotH + 20}
               textAnchor="middle"
-              fontSize={11}
+              fontSize={TICK_FONT}
               fill="var(--text-muted)"
               style={{ fontVariantNumeric: "tabular-nums" }}
               data-x-tick
@@ -543,15 +642,15 @@ function Chart({
             x={PAD.left + plotW / 2}
             y={height - 6}
             textAnchor="middle"
-            fontSize={12}
+            fontSize={AXIS_FONT}
             fill="var(--text-secondary)"
           >
             {xLabel}
           </text>
           <text
-            transform={`translate(14, ${PAD.top + plotH / 2}) rotate(-90)`}
+            transform={`translate(16, ${PAD.top + plotH / 2}) rotate(-90)`}
             textAnchor="middle"
-            fontSize={12}
+            fontSize={AXIS_FONT}
             fill="var(--text-secondary)"
           >
             {yLabel}
@@ -593,7 +692,7 @@ function Chart({
                       x={Math.min(sx(last.x) + 8, PAD.left + plotW - 4)}
                       y={sy(last.y)}
                       dominantBaseline="middle"
-                      fontSize={11}
+                      fontSize={TICK_FONT}
                       fill="var(--text-secondary)"
                     >
                       {s.name}
@@ -605,27 +704,53 @@ function Chart({
           </g>
 
           {/* crosshair */}
-          {hover && (
-            <g pointerEvents="none">
+          {hover && inX(hover.x) && (
+            <g pointerEvents="none" data-crosshair>
               <line
                 x1={sx(hover.x)}
                 x2={sx(hover.x)}
                 y1={PAD.top}
                 y2={PAD.top + plotH}
                 stroke="var(--text-muted)"
-                strokeWidth={1}
-                strokeDasharray="3 3"
+                strokeWidth={hover.pinned ? 1.5 : 1}
+                strokeDasharray={hover.pinned ? undefined : "3 3"}
               />
               {hover.readouts.map((r) => (
                 <circle
                   key={r.name}
                   cx={sx(r.point.x)}
                   cy={sy(r.point.y)}
-                  r={6}
+                  r={7}
                   fill={r.color}
                   stroke="var(--surface-1)"
                   strokeWidth={2}
                 />
+              ))}
+              {pairLabels(hover.readouts).map((l) => (
+                <g key={l.name} data-pair>
+                  <rect
+                    x={l.x}
+                    y={l.y}
+                    width={l.w}
+                    height={PAIR_H}
+                    rx={6}
+                    fill="var(--surface-1)"
+                    stroke={l.color}
+                    strokeWidth={1.5}
+                  />
+                  <text
+                    x={l.x + l.w / 2}
+                    y={l.y + PAIR_H / 2}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={PAIR_FONT}
+                    fontWeight={600}
+                    fill="var(--text-primary)"
+                    style={{ fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {l.text}
+                  </text>
+                </g>
               ))}
             </g>
           )}
@@ -633,9 +758,9 @@ function Chart({
       </div>
 
       {hover && (
-        <div className="tabular mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[12px] text-[var(--text-secondary)]">
+        <div className="tabular mt-1 flex flex-wrap gap-x-4 gap-y-1 px-1 text-[15px] text-[var(--text-secondary)]">
           <span>
-            {xLabel.split(" ")[0]} {fmt(hover.x)}
+            {xLabel.split(" ")[0]} {withUnit(hover.x, xUnit)}
           </span>
           {hover.readouts.map((r) => (
             <span key={r.name} className="flex items-center gap-1.5">
@@ -650,8 +775,10 @@ function Chart({
           ))}
         </div>
       )}
-      <p className="mt-1 px-1 text-[11px] text-[var(--text-muted)]">
-        Pinch to zoom, drag to scroll, double-tap to reset.
+      <p className="mt-1 px-1 text-[13px] text-[var(--text-muted)]">
+        {hover?.pinned
+          ? "Point pinned on every graph — tap it again to release."
+          : "Tap a point to pin it. Pinch to zoom, drag to scroll, double-tap to reset."}
       </p>
     </div>
   );
