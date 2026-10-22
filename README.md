@@ -88,7 +88,7 @@ These constraints shaped the design and are worth knowing before adding tools:
   under "Force & energy (optional)" and can also be entered after Stop.
 - **Tap the ball in the camera view** to re-sample its colour if the ring
   will not lock on, or to track a differently coloured object. The swatch
-  shows the current target; "Reset to yellow/orange" restores the default.
+  shows the current target; "Reset" restores the default yellow/orange.
   Colour detection sensitivity runs from strict (only colours very close to
   the object) to loose (nearby shades too); Smoothing trades jitter
   against lag (a One Euro filter: it filters hard when the object is still

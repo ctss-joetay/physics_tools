@@ -730,7 +730,7 @@ export default function LiveTracker() {
             {sampleMsg && (
               <div
                 className={`absolute bottom-2 right-2 rounded-md bg-black/70 px-3 py-1.5 text-center text-[14px] text-white ${
-                  phase === "preview" && railOpen ? "left-2 sm:left-[21rem]" : "left-2"
+                  phase === "preview" && railOpen ? "left-2 sm:left-[23rem]" : "left-2"
                 }`}
               >
                 {sampleMsg}
@@ -744,7 +744,7 @@ export default function LiveTracker() {
           {phase === "preview" && (
             <aside
               data-testid="setup-rail"
-              className={`mt-3 flex flex-col rounded-lg border border-[var(--border)] bg-[var(--surface-1)] sm:absolute sm:left-2 sm:top-2 sm:mt-0 sm:w-80 sm:bg-[var(--surface-1)]/90 sm:shadow-lg sm:backdrop-blur ${
+              className={`mt-3 flex flex-col rounded-lg border border-[var(--border)] bg-[var(--surface-1)] sm:absolute sm:left-2 sm:top-2 sm:mt-0 sm:w-[22rem] sm:bg-[var(--surface-1)]/90 sm:shadow-lg sm:backdrop-blur ${
                 railOpen ? "sm:bottom-2" : ""
               }`}
             >
@@ -765,27 +765,33 @@ export default function LiveTracker() {
                   railOpen ? "" : "sm:hidden"
                 }`}
               >
-                <div className="text-[15px]">
-                  <span className="text-[var(--text-secondary)]">Target colour</span>
-                  <div className="mt-2 flex items-center gap-3">
-                    <span
-                      data-testid="sample-swatch"
-                      aria-label={`target hue ${Math.round(target.hue)} degrees`}
-                      className="inline-block h-8 w-8 shrink-0 rounded-full border border-[var(--border)]"
-                      style={{ background: hueToCss(target.hue) }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
-                      disabled={target.hue === DEFAULT_TARGET.hue}
-                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
-                    >
-                      Reset to yellow/orange
-                    </button>
+                <div className="grid grid-cols-2 items-start gap-3">
+                  <div className="text-[15px]">
+                    <span className="text-[var(--text-secondary)]">Target colour</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span
+                        data-testid="sample-swatch"
+                        aria-label={`target hue ${Math.round(target.hue)} degrees`}
+                        className="inline-block h-[42px] w-[42px] shrink-0 rounded-full border border-[var(--border)]"
+                        style={{ background: hueToCss(target.hue) }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
+                        disabled={target.hue === DEFAULT_TARGET.hue}
+                        aria-label="Reset to yellow/orange"
+                        title="Reset to yellow/orange"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+                      Tap the object in the camera view to change colour
+                    </span>
                   </div>
-                  <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                    Tap the object in the camera view to track a different colour
-                  </span>
+
+                  {diameterField}
                 </div>
 
                 <label className="block text-[15px]">
@@ -812,8 +818,6 @@ export default function LiveTracker() {
                     accepts nearby shades too
                   </span>
                 </label>
-
-                {diameterField}
 
                 <label className="block text-[15px]">
                   <span className="text-[var(--text-secondary)]">Smoothing</span>
