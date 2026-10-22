@@ -39,12 +39,12 @@ export default function StepBanner({
         />
       )}
       <div className="min-w-0">
-        <p className="text-[13px] font-semibold uppercase tracking-wide text-white/85">
+        <p className="text-[15px] font-semibold uppercase tracking-wide text-white/85">
           {step}
         </p>
-        <p className="text-[15px] font-medium leading-snug">{instruction}</p>
+        <p className="text-[17px] font-medium leading-snug">{instruction}</p>
         {hint && (
-          <p className="mt-0.5 text-[12px] leading-snug text-white/75">{hint}</p>
+          <p className="mt-0.5 text-[14px] leading-snug text-white/75">{hint}</p>
         )}
       </div>
     </div>

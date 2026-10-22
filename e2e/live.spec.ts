@@ -104,6 +104,25 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   await expect(page.getByTestId("reset-zoom")).toHaveCount(0);
   expect(await xTicks(page, 0)).toEqual(before);
 
+  // Hover: pointing at chart 2 shows "(t, y)" labels on every linked chart.
+  const charts = page.locator('[data-testid="graphs"] [data-chart]');
+  const nCharts = await charts.count();
+  const b2 = (await svg2.boundingBox())!;
+  const spot = { x: b2.x + b2.width * 0.5, y: b2.y + b2.height / 2 };
+  await page.mouse.move(spot.x, spot.y);
+  for (let i = 0; i < nCharts; i++) {
+    await expect(charts.nth(i).locator("[data-pair]").first()).toContainText(/^\(.+ s, .+\)$/);
+  }
+  // Click pins it: it stays on every chart after the pointer leaves.
+  await page.mouse.click(spot.x, spot.y);
+  await page.mouse.move(0, 0);
+  await expect(charts.nth(0).locator("[data-pair]").first()).toBeVisible();
+  await expect(charts.nth(nCharts - 1).locator("[data-pair]").first()).toBeVisible();
+  // Clicking the pinned point again releases it.
+  await page.mouse.click(spot.x, spot.y);
+  await page.mouse.move(0, 0);
+  await expect(page.locator('[data-testid="graphs"] [data-pair]')).toHaveCount(0);
+
   // Touch pinch (iPad) zooms as well.
   await touchPinch(page, '[data-testid="graphs"] [data-chart] svg', 100, 300);
   await expect(page.getByTestId("reset-zoom").first()).toBeVisible();
