@@ -82,10 +82,15 @@ These constraints shaped the design and are worth knowing before adding tools:
 - **The step banner always says what to do next.** Start camera → allow
   access → wait for the ring to lock on → Start → Stop. Recording stops by
   itself after 60 s.
+- **Set up before you start.** Once the camera is on, every setting and the
+  Start button sit in a rail over the left of the camera view (under it on
+  phones); "Hide" folds it away if it covers the ball. Mass and g are tucked
+  under "Force & energy (optional)" and can also be entered after Stop.
 - **Tap the ball in the camera view** to re-sample its colour if the ring
   will not lock on, or to track a differently coloured object. The swatch
   shows the current target; "Reset to yellow/orange" restores the default.
-  Sensitivity widens or narrows the colour match; Smoothing trades jitter
+  Colour detection sensitivity runs from strict (only colours very close to
+  the object) to loose (nearby shades too); Smoothing trades jitter
   against lag (a One Euro filter: it filters hard when the object is still
   and relaxes when it moves fast).
 - **Scale comes from the ball's own diameter.** Enter it in metres. Leave the
