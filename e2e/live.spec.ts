@@ -111,7 +111,7 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   const spot = { x: b2.x + b2.width * 0.5, y: b2.y + b2.height / 2 };
   await page.mouse.move(spot.x, spot.y);
   for (let i = 0; i < nCharts; i++) {
-    await expect(charts.nth(i).locator("[data-pair]").first()).toContainText(/^\(.+ s, .+\)$/);
+    await expect(charts.nth(i).locator("[data-pair]").first()).toContainText(/^\([^ ,]+, [^ ,]+\)$/);
   }
   // Click pins it: it stays on every chart after the pointer leaves.
   await page.mouse.click(spot.x, spot.y);
