@@ -5,7 +5,7 @@ import Chart, { type Hover } from "./Chart";
 import { fitLinear, fitQuadratic, sig } from "@/lib/fit";
 import { copyText, downloadCsv, toCsv, toTsv } from "@/lib/csv";
 import { csvHeaders, derive, unitLabels, type Sample, type Unit } from "@/lib/motion";
-import type { Range } from "@/lib/view";
+import { isZoomed, type Range } from "@/lib/view";
 
 type Props = {
   data: Sample[];
@@ -43,10 +43,24 @@ export default function MotionAnalysis({
   const d = useMemo(() => derive(data), [data]);
   const labels = unitLabels(unit);
 
-  const fitX = useMemo(() => fitQuadratic(d.xPts), [d.xPts]);
-  const fitY = useMemo(() => fitQuadratic(d.yPts), [d.yPts]);
-  const fitVx = useMemo(() => fitLinear(d.vxPts), [d.vxPts]);
-  const fitVy = useMemo(() => fitLinear(d.vyPts), [d.vyPts]);
+  const tDomain = useMemo<Range>(
+    () => (data.length ? [data[0].t, data[data.length - 1].t] : [0, 1]),
+    [data],
+  );
+  // The fits cover only the time shown on the graphs. A run is rarely one
+  // clean motion (a ball sits still, then falls), and one parabola through
+  // all of it measures nothing; zooming in on the fall fits just the fall.
+  const fitRange = xView ?? tDomain;
+  const fits = useMemo(() => {
+    const inRange = (pts: { t: number; s: number }[]) =>
+      pts.filter((p) => p.t >= fitRange[0] && p.t <= fitRange[1]);
+    return {
+      x: fitQuadratic(inRange(d.xPts)),
+      y: fitQuadratic(inRange(d.yPts)),
+      vx: fitLinear(inRange(d.vxPts)),
+      vy: fitLinear(inRange(d.vyPts)),
+    };
+  }, [d, fitRange[0], fitRange[1]]);
 
   // Joules and newtons need metres and a mass; otherwise these stay hidden.
   const dynamicsOn =
@@ -159,10 +173,6 @@ export default function MotionAnalysis({
     }),
     [d, force, energy],
   );
-  const tDomain = useMemo<Range>(
-    () => (data.length ? [data[0].t, data[data.length - 1].t] : [0, 1]),
-    [data],
-  );
   const tableHeaders = useMemo(
     () => [
       "t / s",
@@ -255,11 +265,17 @@ export default function MotionAnalysis({
         )}
       </section>
 
+      <p className="px-1 text-[14px] leading-relaxed text-[var(--text-muted)]" data-testid="fit-range">
+        Fitted over t = {sig(fitRange[0])} s to {sig(fitRange[1])} s
+        {xView && isZoomed(xView, tDomain)
+          ? ", the time shown on the graphs."
+          : ". Zoom the graphs in on one stretch of motion (just the fall, say) to fit only that part."}
+      </p>
       <div className="grid gap-4 sm:grid-cols-2">
         {(
           [
-            ["Horizontal (x)", fitX, fitVx, "var(--series-1)"],
-            ["Vertical (y)", fitY, fitVy, "var(--series-2)"],
+            ["Horizontal (x)", fits.x, fits.vx, "var(--series-1)"],
+            ["Vertical (y)", fits.y, fits.vy, "var(--series-2)"],
           ] as const
         ).map(([label, q, l, color]) => (
           <div

@@ -90,9 +90,11 @@ These constraints shaped the design and are worth knowing before adding tools:
   will not lock on, or to track a differently coloured object. The swatch
   shows the current target; "Reset" restores the default yellow/orange.
   Colour detection sensitivity runs from strict (only colours very close to
-  the object) to loose (nearby shades too); Smoothing trades jitter
-  against lag (a One Euro filter: it filters hard when the object is still
-  and relaxes when it moves fast).
+  the object) to loose (nearby shades too); Smoothing steadies the
+  trail drawn on screen (a One Euro filter). The graphs, fits and table use
+  the unsmoothed position: the filter lags a sudden move and then catches
+  up, which would read as a false acceleration (a dropped ball came out at
+  about twice g).
 - **Scale comes from the ball's own diameter.** Enter it in metres. Leave the
   field blank to work in arbitrary units, where 1 a.u. is one ball diameter;
   the graphs, table and CSV are labelled `a.u.`, and the force and energy
@@ -116,6 +118,9 @@ These constraints shaped the design and are worth knowing before adding tools:
   zoomed, **double-tap** or press Reset zoom to go back. On a trackpad, pinch
   zooms and a two-finger sideways scroll pans. Zooming or scrolling time on
   one graph moves all of them, so they stay aligned for comparison.
+- **The fits use only the time shown on the graphs.** Zoom in on one stretch
+  of motion (for free fall, just the fall, not the ball sitting still before
+  it) and `u` and `a` are fitted to that stretch alone.
 - Leaving the video tracker's known length blank also switches it to
   arbitrary units (1 a.u. = the calibration line).
 

@@ -212,21 +212,31 @@ export default function LiveTracker() {
 
     lostFramesRef.current = 0;
     lastBlobRef.current = found;
-    const sx = fx.current.filter(found.cx, tSeconds);
-    const sy = fy.current.filter(found.cy, tSeconds);
+    const t = tSeconds - t0Ref.current;
+    // The data keeps the raw detection. The smoothing filter is causal and
+    // adapts to speed, so on a sudden move (a dropped ball) it lags and then
+    // catches up, and that catch-up reads as a much larger acceleration
+    // than the real one. It is only used for the trail on screen.
+    if (phaseRef.current === "recording") {
+      rawRef.current.push({
+        t,
+        px: found.cx / dims.w,
+        py: found.cy / dims.h,
+        diameter: found.diameter,
+      });
+    }
     const sample: RawSample = {
-      t: tSeconds - t0Ref.current,
-      px: sx / dims.w,
-      py: sy / dims.h,
+      t,
+      px: fx.current.filter(found.cx, tSeconds) / dims.w,
+      py: fy.current.filter(found.cy, tSeconds) / dims.h,
       diameter: found.diameter,
     };
-    if (phaseRef.current === "recording") rawRef.current.push(sample);
     const recent = recentRef.current;
     recent.push(sample);
     while (recent.length && sample.t - recent[0].t > TRAIL_SECONDS) recent.shift();
 
     // The ring sits on the raw detection every frame so it visibly stays on
-    // the ball; the trail and the data use the smoothed position.
+    // the ball; the trail uses the smoothed position.
     setBlob(found);
     setTrail([...recent]);
     if (now - lastOverlayRef.current > OVERLAY_MS) {
@@ -870,8 +880,8 @@ export default function LiveTracker() {
                     <span>More</span>
                   </span>
                   <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                    More smoothing reduces jittering but struggles with fast-moving
-                    objects
+                    Steadies the trail on screen. Graphs and data always use the
+                    unsmoothed position
                   </span>
                 </label>
 
