@@ -40,6 +40,10 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   await expect(rail).toHaveCount(0);
   await expect(banner(page)).toHaveAttribute("data-tone", "live");
   await expect(page.getByTestId("live-charts")).toBeVisible();
+  // Every motion graph runs live, not just displacement and velocity.
+  for (const title of ["Displacement–time", "Velocity–time", "Speed–time", "Acceleration–time"]) {
+    await expect(page.getByTestId("live-charts").getByText(title, { exact: true })).toBeVisible();
+  }
   await expect
     .poll(
       async () =>

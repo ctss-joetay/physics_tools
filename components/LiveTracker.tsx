@@ -98,7 +98,7 @@ export default function LiveTracker() {
   const [tooFew, setTooFew] = useState(false);
   /** Setup rail over the camera view; can be folded away if it hides the ball. */
   const [railOpen, setRailOpen] = useState(true);
-  // The two live graphs share one time view and one hovered/pinned instant.
+  // The live graphs share one time view and one hovered/pinned instant.
   const [liveView, setLiveView] = useState<Range | null>(null);
   const [liveHover, setLiveHover] = useState<Hover | null>(null);
 
@@ -466,19 +466,57 @@ export default function LiveTracker() {
   // ------------------------------------------------------------ derived
 
   const live = useMemo(() => derive(liveData), [liveData]);
-  const liveSeries = useMemo(
-    () => ({
+  const massKg = parseFloat(mass);
+  const g = parseFloat(gravity);
+  const diameterBlank = !(parseFloat(diameter) > 0);
+  // Joules and newtons need metres, a mass and g, as in the final analysis.
+  const liveDynamics =
+    !diameterBlank && Number.isFinite(massKg) && massKg > 0 && Number.isFinite(g) && g > 0;
+  const liveSeries = useMemo(() => {
+    // The newest derivative is a one-sided difference and swings with every
+    // frame, so the live curves hold back a tick per derivative: velocity and
+    // speed trail displacement by one sample, acceleration and force by two.
+    const lag = (arr: { t: number; s: number }[], k: number) => arr.slice(0, Math.max(0, arr.length - k));
+    const pts = (arr: { t: number; s: number }[]) => arr.map((p) => ({ x: p.t, y: p.s }));
+    const vx = lag(live.vxPts, 1);
+    const vy = lag(live.vyPts, 1);
+    const speed = lag(live.speedPts, 1);
+    const ax = lag(live.axPts, 2);
+    const ay = lag(live.ayPts, 2);
+    const energy = liveDynamics
+      ? speed.map((p, i) => {
+          const ke = 0.5 * massKg * p.s * p.s;
+          const gpe = massKg * g * live.yPts[i].s;
+          return { t: p.t, ke, gpe, total: ke + gpe };
+        })
+      : [];
+    return {
       s: [
-        { name: "x", color: "var(--series-1)", points: live.xPts.map((p) => ({ x: p.t, y: p.s })) },
-        { name: "y", color: "var(--series-2)", points: live.yPts.map((p) => ({ x: p.t, y: p.s })) },
+        { name: "x", color: "var(--series-1)", points: pts(live.xPts) },
+        { name: "y", color: "var(--series-2)", points: pts(live.yPts) },
       ],
       v: [
-        { name: "vx", color: "var(--series-1)", points: live.vxPts.map((p) => ({ x: p.t, y: p.s })) },
-        { name: "vy", color: "var(--series-2)", points: live.vyPts.map((p) => ({ x: p.t, y: p.s })) },
+        { name: "vx", color: "var(--series-1)", points: pts(vx) },
+        { name: "vy", color: "var(--series-2)", points: pts(vy) },
       ],
-    }),
-    [live],
-  );
+      speed: [{ name: "speed", color: "var(--series-3)", points: pts(speed) }],
+      a: [
+        { name: "ax", color: "var(--series-1)", points: pts(ax) },
+        { name: "ay", color: "var(--series-2)", points: pts(ay) },
+      ],
+      f: liveDynamics
+        ? [
+            { name: "Fx", color: "var(--series-1)", points: ax.map((p) => ({ x: p.t, y: massKg * p.s })) },
+            { name: "Fy", color: "var(--series-2)", points: ay.map((p) => ({ x: p.t, y: massKg * p.s })) },
+          ]
+        : [],
+      e: [
+        { name: "Kinetic store", color: "var(--series-1)", points: energy.map((e) => ({ x: e.t, y: e.ke })) },
+        { name: "Gravitational potential store", color: "var(--series-2)", points: energy.map((e) => ({ x: e.t, y: e.gpe })) },
+        { name: "Total", color: "var(--series-3)", points: energy.map((e) => ({ x: e.t, y: e.total })) },
+      ],
+    };
+  }, [live, liveDynamics, massKg, g]);
   const liveDomain = useMemo<Range | undefined>(
     () =>
       liveData.length ? [liveData[0].t, liveData[liveData.length - 1].t] : undefined,
@@ -491,9 +529,6 @@ export default function LiveTracker() {
     hover: liveHover,
     onHoverChange: setLiveHover,
   };
-  const massKg = parseFloat(mass);
-  const g = parseFloat(gravity);
-  const diameterBlank = !(parseFloat(diameter) > 0);
 
   const banner = (() => {
     switch (phase) {
@@ -943,6 +978,46 @@ export default function LiveTracker() {
               series={liveSeries.v}
               {...liveLink}
             />
+            <Chart
+              title="Speed–time"
+              xLabel="time / s"
+              yLabel={`speed / ${diameterBlank ? "a.u." : "m"} s⁻¹`}
+              unit={`${diameterBlank ? "a.u." : "m"} s⁻¹`}
+              height={260}
+              series={liveSeries.speed}
+              {...liveLink}
+            />
+            <Chart
+              title="Acceleration–time"
+              xLabel="time / s"
+              yLabel={`acceleration / ${diameterBlank ? "a.u." : "m"} s⁻²`}
+              unit={`${diameterBlank ? "a.u." : "m"} s⁻²`}
+              height={260}
+              series={liveSeries.a}
+              {...liveLink}
+            />
+            {liveDynamics && (
+              <>
+                <Chart
+                  title="Net force–time"
+                  xLabel="time / s"
+                  yLabel="force / N"
+                  unit="N"
+                  height={260}
+                  series={liveSeries.f}
+                  {...liveLink}
+                />
+                <Chart
+                  title="Energy stores–time"
+                  xLabel="time / s"
+                  yLabel="energy / J"
+                  unit="J"
+                  height={300}
+                  series={liveSeries.e}
+                  {...liveLink}
+                />
+              </>
+            )}
           </section>
         )}
 
