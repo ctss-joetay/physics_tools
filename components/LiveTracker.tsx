@@ -765,7 +765,28 @@ export default function LiveTracker() {
                   railOpen ? "" : "sm:hidden"
                 }`}
               >
-                {diameterField}
+                <div className="text-[15px]">
+                  <span className="text-[var(--text-secondary)]">Target colour</span>
+                  <div className="mt-2 flex items-center gap-3">
+                    <span
+                      data-testid="sample-swatch"
+                      aria-label={`target hue ${Math.round(target.hue)} degrees`}
+                      className="inline-block h-8 w-8 shrink-0 rounded-full border border-[var(--border)]"
+                      style={{ background: hueToCss(target.hue) }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
+                      disabled={target.hue === DEFAULT_TARGET.hue}
+                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
+                    >
+                      Reset to yellow/orange
+                    </button>
+                  </div>
+                  <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+                    Tap the object in the camera view to track a different colour
+                  </span>
+                </div>
 
                 <label className="block text-[15px]">
                   <span className="text-[var(--text-secondary)]">
@@ -792,6 +813,8 @@ export default function LiveTracker() {
                   </span>
                 </label>
 
+                {diameterField}
+
                 <label className="block text-[15px]">
                   <span className="text-[var(--text-secondary)]">Smoothing</span>
                   <input
@@ -807,29 +830,6 @@ export default function LiveTracker() {
                     More smoothing steadies a jittery dot but lags fast motion
                   </span>
                 </label>
-
-                <div className="text-[15px]">
-                  <span className="text-[var(--text-secondary)]">Target colour</span>
-                  <div className="mt-2 flex items-center gap-3">
-                    <span
-                      data-testid="sample-swatch"
-                      aria-label={`target hue ${Math.round(target.hue)} degrees`}
-                      className="inline-block h-8 w-8 shrink-0 rounded-full border border-[var(--border)]"
-                      style={{ background: hueToCss(target.hue) }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
-                      disabled={target.hue === DEFAULT_TARGET.hue}
-                      className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
-                    >
-                      Reset to yellow/orange
-                    </button>
-                  </div>
-                  <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                    Tap the object in the camera view to track a different colour
-                  </span>
-                </div>
 
                 {/* Optional, and still editable after Stop, so folded away. */}
                 <details className="text-[15px]">
