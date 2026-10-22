@@ -556,7 +556,7 @@ export default function LiveTracker() {
       <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
         {diameterBlank
           ? "Blank → arbitrary units (1 a.u. = one object diameter)"
-          : "Real diameter of the tracked object (tennis ball ≈ 0.067)"}
+          : "Estimated diameter of the object (tennis ball ≈ 0.067)"}
       </span>
     </label>
   );
