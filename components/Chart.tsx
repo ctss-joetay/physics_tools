@@ -461,7 +461,8 @@ function Chart({
     const labels = readouts
       .filter((r) => Number.isFinite(r.point.y))
       .map((r) => {
-        const text = `(${withUnit(r.point.x, xUnit)}, ${withUnit(r.point.y, unit)})`;
+        // Bare numbers: the axis labels already carry the units.
+        const text = `(${fmt(r.point.x)}, ${fmt(r.point.y)})`;
         const w = text.length * PAIR_FONT * 0.56 + 16;
         const cx = sx(r.point.x);
         const x = cx + 12 + w <= right ? cx + 12 : Math.max(PAD.left, cx - 12 - w);

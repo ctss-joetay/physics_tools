@@ -96,6 +96,8 @@ export default function LiveTracker() {
   const [sampleMsg, setSampleMsg] = useState<string | null>(null);
   const [result, setResult] = useState<ReturnType<typeof finaliseRun>>(null);
   const [tooFew, setTooFew] = useState(false);
+  /** Setup rail over the camera view; can be folded away if it hides the ball. */
+  const [railOpen, setRailOpen] = useState(true);
   // The two live graphs share one time view and one hovered/pinned instant.
   const [liveView, setLiveView] = useState<Range | null>(null);
   const [liveHover, setLiveHover] = useState<Hover | null>(null);
@@ -505,7 +507,7 @@ export default function LiveTracker() {
         return blob
           ? {
               step: "Step 2 of 3 — Ready",
-              instruction: "The ring is on the object. Check the diameter, then press Start.",
+              instruction: "The ring is on the object. Check the settings, then press Start.",
               tone: "info" as const,
             }
           : {
@@ -532,6 +534,72 @@ export default function LiveTracker() {
 
   const ring = blob && scan ? Math.max(blob.diameter / 2, 4) : 0;
   const remaining = maxRun - elapsed;
+
+  // ------------------------------------------------------------ fields
+
+  // Shared by the setup rail (before a run) and the panel under the video
+  // (after Stop, when only the numbers that feed the analysis still matter).
+  const diameterField = (
+    <label className="block text-[15px]">
+      <span className="text-[var(--text-secondary)]">Object diameter / m</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        step="0.001"
+        min="0"
+        placeholder="blank = arbitrary units"
+        value={diameter}
+        onChange={(e) => setDiameter(e.target.value)}
+        data-testid="diameter-input"
+        className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
+      />
+      <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+        {diameterBlank
+          ? "Blank → arbitrary units (1 a.u. = one object diameter)"
+          : "Estimated diameter of the object (tennis ball ≈ 0.067)"}
+      </span>
+    </label>
+  );
+
+  const massField = (
+    <label className="block text-[15px]">
+      <span className="text-[var(--text-secondary)]">Mass / kg</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        step="0.001"
+        min="0"
+        placeholder="optional"
+        value={mass}
+        onChange={(e) => setMass(e.target.value)}
+        data-testid="mass-input"
+        className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
+      />
+      <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+        {diameterBlank
+          ? "Force and energy need a real diameter as well as a mass"
+          : "Enter a mass to unlock the force and energy graphs"}
+      </span>
+    </label>
+  );
+
+  const gravityField = (
+    <label className="block text-[15px]">
+      <span className="text-[var(--text-secondary)]">g / m s⁻²</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        step="0.01"
+        min="0"
+        value={gravity}
+        onChange={(e) => setGravity(e.target.value)}
+        className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
+      />
+      <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+        Used for GPE — set 10 if that is your syllabus convention
+      </span>
+    </label>
+  );
 
   // ------------------------------------------------------------ render
 
@@ -570,6 +638,7 @@ export default function LiveTracker() {
 
       <div className={phase === "off" ? "hidden" : "space-y-3"}>
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
+          <div className="relative">
           <div
             ref={surfaceRef}
             data-tap-surface
@@ -639,7 +708,9 @@ export default function LiveTracker() {
             {phase !== "done" && lost && (
               <div
                 data-testid="lost-badge"
-                className="absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-[14px] text-white"
+                className={`absolute top-2 rounded-md bg-black/70 px-2 py-1 text-[14px] text-white ${
+                  phase === "preview" ? "right-2" : "left-2"
+                }`}
               >
                 {phase === "recording"
                   ? "Lost — looking…"
@@ -657,24 +728,155 @@ export default function LiveTracker() {
             )}
 
             {sampleMsg && (
-              <div className="absolute bottom-2 left-2 right-2 rounded-md bg-black/70 px-3 py-1.5 text-center text-[14px] text-white">
+              <div
+                className={`absolute bottom-2 right-2 rounded-md bg-black/70 px-3 py-1.5 text-center text-[14px] text-white ${
+                  phase === "preview" && railOpen ? "left-2 sm:left-[23rem]" : "left-2"
+                }`}
+              >
                 {sampleMsg}
               </div>
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {phase === "preview" && (
-              <button
-                type="button"
-                onClick={start}
-                disabled={!blob}
-                data-testid="primary-action"
-                className="rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[16px] font-medium text-white disabled:opacity-40"
+          {/* Setup rail: over the left of the camera view on tablets and up,
+              stacked under it on phones. A sibling of the tap surface, so
+              touching a control never samples a colour. */}
+          {phase === "preview" && (
+            <aside
+              data-testid="setup-rail"
+              className={`mt-3 flex flex-col rounded-lg border border-[var(--border)] bg-[var(--surface-1)] sm:absolute sm:left-2 sm:top-2 sm:mt-0 sm:w-[22rem] sm:bg-[var(--surface-1)]/90 sm:shadow-lg sm:backdrop-blur ${
+                railOpen ? "sm:bottom-2" : ""
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 px-3 pt-3">
+                <h3 className="text-[16px] font-medium">Set up before you start</h3>
+                <button
+                  type="button"
+                  onClick={() => setRailOpen((o) => !o)}
+                  aria-expanded={railOpen}
+                  className="hidden rounded-md border border-[var(--border)] px-2 py-1 text-[13px] text-[var(--text-secondary)] sm:block"
+                >
+                  {railOpen ? "Hide" : "Settings"}
+                </button>
+              </div>
+
+              <div
+                className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pt-2 ${
+                  railOpen ? "" : "sm:hidden"
+                }`}
               >
-                Start
-              </button>
-            )}
+                <div className="grid grid-cols-2 items-start gap-3">
+                  <div className="text-[15px]">
+                    <span className="text-[var(--text-secondary)]">Target colour</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span
+                        data-testid="sample-swatch"
+                        aria-label={`target hue ${Math.round(target.hue)} degrees`}
+                        className="inline-block h-[42px] w-[42px] shrink-0 rounded-full border border-[var(--border)]"
+                        style={{ background: hueToCss(target.hue) }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
+                        disabled={target.hue === DEFAULT_TARGET.hue}
+                        aria-label="Reset to yellow/orange"
+                        title="Reset to yellow/orange"
+                        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+                      Tap the object in the camera view to change colour
+                    </span>
+                  </div>
+
+                  {diameterField}
+                </div>
+
+                <label className="block text-[15px]">
+                  <span className="text-[var(--text-secondary)]">
+                    Colour detection sensitivity
+                  </span>
+                  <span className="mt-1 flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
+                    <span>Strict</span>
+                    <input
+                      type="range"
+                      min={SENSITIVITY.min}
+                      max={SENSITIVITY.max}
+                      step={1}
+                      value={target.tolerance}
+                      onChange={(e) =>
+                        setTarget((t) => ({ ...t, tolerance: parseInt(e.target.value, 10) }))
+                      }
+                      className="min-w-0 flex-1 accent-[var(--series-1)]"
+                    />
+                    <span>Loose</span>
+                  </span>
+                  <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+                    Strict only accepts colours very close to your object; loose
+                    accepts nearby shades too
+                  </span>
+                </label>
+
+                <label className="block text-[15px]">
+                  <span className="text-[var(--text-secondary)]">Smoothing</span>
+                  <span className="mt-1 flex items-center gap-2 text-[13px] text-[var(--text-secondary)]">
+                    <span>Less</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={smoothing}
+                      onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
+                      className="min-w-0 flex-1 accent-[var(--series-1)]"
+                    />
+                    <span>More</span>
+                  </span>
+                  <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
+                    More smoothing reduces jittering but struggles with fast-moving
+                    objects
+                  </span>
+                </label>
+
+                {/* Optional, and still editable after Stop, so folded away. */}
+                <details className="text-[15px]">
+                  <summary className="cursor-pointer text-[var(--text-secondary)]">
+                    Force &amp; energy (optional)
+                  </summary>
+                  <div className="mt-3 space-y-4">
+                    {massField}
+                    {gravityField}
+                  </div>
+                </details>
+              </div>
+
+              <div className="space-y-2 border-t border-[var(--border)] p-3 sm:mt-2">
+                <p className="flex flex-wrap justify-between gap-x-3 text-[14px] text-[var(--text-muted)]">
+                  <span>{blob ? "Object found." : "Waiting for a bright yellow/orange object…"}</span>
+                  {liveScale && (
+                    <span data-testid="scale-readout" className="tabular">
+                      {liveScale}
+                    </span>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={start}
+                  disabled={!blob}
+                  data-testid="primary-action"
+                  className="w-full rounded-lg bg-[var(--series-1)] px-4 py-2.5 text-[16px] font-medium text-white disabled:opacity-40"
+                >
+                  Start
+                </button>
+              </div>
+            </aside>
+          )}
+          </div>
+
+          {phase !== "preview" && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             {phase === "recording" && (
               <button
                 type="button"
@@ -695,14 +897,7 @@ export default function LiveTracker() {
                 New run
               </button>
             )}
-            {phase === "preview" && (
-              <span className="text-[14px] text-[var(--text-muted)]">
-                {blob
-                  ? "Object found."
-                  : "Waiting for a bright yellow/orange object…"}
-              </span>
-            )}
-            {liveScale && phase !== "done" && (
+            {liveScale && phase === "recording" && (
               <span
                 data-testid="scale-readout"
                 className="tabular ml-auto text-[14px] text-[var(--text-muted)]"
@@ -711,6 +906,7 @@ export default function LiveTracker() {
               </span>
             )}
           </div>
+          )}
         </div>
 
         {stopNote && (
@@ -719,127 +915,13 @@ export default function LiveTracker() {
           </p>
         )}
 
-        {phase !== "off" && (
+        {phase === "done" && (
           <div className="grid gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 sm:grid-cols-3">
-            <label className="block text-[15px]">
-              <span className="text-[var(--text-secondary)]">
-                Object diameter / m
-              </span>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.001"
-                min="0"
-                placeholder="blank = arbitrary units"
-                value={diameter}
-                onChange={(e) => setDiameter(e.target.value)}
-                data-testid="diameter-input"
-                className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
-              />
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                {diameterBlank
-                  ? "Blank → arbitrary units (1 a.u. = one object diameter)"
-                  : "Real diameter of the tracked object (tennis ball ≈ 0.067)"}
-              </span>
-            </label>
-
-            {phase !== "done" && (<>
-            <label className="block text-[15px]">
-              <span className="text-[var(--text-secondary)]">Sensitivity</span>
-              <input
-                type="range"
-                min={SENSITIVITY.min}
-                max={SENSITIVITY.max}
-                step={1}
-                value={target.tolerance}
-                onChange={(e) =>
-                  setTarget((t) => ({ ...t, tolerance: parseInt(e.target.value, 10) }))
-                }
-                className="mt-2 w-full accent-[var(--series-1)]"
-              />
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                Narrow if it grabs the wrong thing, widen if it keeps losing the ball
-              </span>
-            </label>
-
-            <label className="block text-[15px]">
-              <span className="text-[var(--text-secondary)]">Smoothing</span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={smoothing}
-                onChange={(e) => setSmoothing(parseInt(e.target.value, 10))}
-                className="mt-2 w-full accent-[var(--series-1)]"
-              />
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                More smoothing steadies a jittery dot but lags fast motion
-              </span>
-            </label>
-
-            <div className="text-[15px]">
-              <span className="text-[var(--text-secondary)]">Target colour</span>
-              <div className="mt-2 flex items-center gap-3">
-                <span
-                  data-testid="sample-swatch"
-                  aria-label={`target hue ${Math.round(target.hue)} degrees`}
-                  className="inline-block h-8 w-8 rounded-full border border-[var(--border)]"
-                  style={{ background: hueToCss(target.hue) }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setTarget((t) => ({ ...t, hue: DEFAULT_TARGET.hue }))}
-                  disabled={target.hue === DEFAULT_TARGET.hue}
-                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[14px] disabled:opacity-40"
-                >
-                  Reset to yellow/orange
-                </button>
-              </div>
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                Tap the object in the camera view to track a different colour
-              </span>
-            </div>
-            </>)}
-
-            <label className="block text-[15px]">
-              <span className="text-[var(--text-secondary)]">Mass / kg</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.001"
-                min="0"
-                placeholder="optional"
-                value={mass}
-                onChange={(e) => setMass(e.target.value)}
-                data-testid="mass-input"
-                className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
-              />
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                {diameterBlank
-                  ? "Force and energy need a real diameter as well as a mass"
-                  : "Enter a mass to unlock the force and energy graphs"}
-              </span>
-            </label>
-
-            <label className="block text-[15px]">
-              <span className="text-[var(--text-secondary)]">g / m s⁻²</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                value={gravity}
-                onChange={(e) => setGravity(e.target.value)}
-                className="tabular mt-1 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2"
-              />
-              <span className="mt-1 block text-[13px] text-[var(--text-muted)]">
-                Used for GPE — set 10 if that is your syllabus convention
-              </span>
-            </label>
+            {diameterField}
+            {massField}
+            {gravityField}
           </div>
         )}
-
         {phase === "recording" && (
           <section className="space-y-3" data-testid="live-charts">
             <h3 className="px-1 text-[16px] font-medium">Live graphs</h3>

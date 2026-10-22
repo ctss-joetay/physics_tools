@@ -26,6 +26,10 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   await expect(page.getByTestId("track-ring")).toBeVisible();
   await expect(page.getByTestId("scale-readout")).toContainText("px per m");
   await expect(page.getByTestId("primary-action")).toBeEnabled();
+  // Settings and Start sit together in the setup rail over the camera view.
+  const rail = page.getByTestId("setup-rail");
+  await expect(rail).toBeVisible();
+  await expect(rail.getByTestId("primary-action")).toHaveText("Start");
 
   // The drawn ball is 36 px across in a 640-wide feed → 0.36 m makes 1 px = 1 cm.
   await page.getByTestId("diameter-input").fill("0.36");
@@ -33,6 +37,7 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
 
   // Step 3 — recording: red banner, live graphs filling with points.
   await expect(banner(page)).toContainText("Recording");
+  await expect(rail).toHaveCount(0);
   await expect(banner(page)).toHaveAttribute("data-tone", "live");
   await expect(page.getByTestId("live-charts")).toBeVisible();
   await expect
@@ -106,7 +111,7 @@ test("a student tracks the fake ball live, from camera to graphs", async ({ page
   const spot = { x: b2.x + b2.width * 0.5, y: b2.y + b2.height / 2 };
   await page.mouse.move(spot.x, spot.y);
   for (let i = 0; i < nCharts; i++) {
-    await expect(charts.nth(i).locator("[data-pair]").first()).toContainText(/^\(.+ s, .+\)$/);
+    await expect(charts.nth(i).locator("[data-pair]").first()).toContainText(/^\([^ ,]+, [^ ,]+\)$/);
   }
   // Click pins it: it stays on every chart after the pointer leaves.
   await page.mouse.click(spot.x, spot.y);
@@ -134,6 +139,7 @@ test("a blank diameter gives arbitrary units and hides force and energy", async 
 
   await page.getByTestId("diameter-input").fill("");
   await expect(page.getByText(/Blank → arbitrary units/)).toBeVisible();
+  await page.getByText("Force & energy (optional)").click();
   await page.getByTestId("mass-input").fill("0.05");
   await expect(page.getByTestId("scale-readout")).toContainText("per a.u.");
 
